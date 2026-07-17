@@ -2,38 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Phase = "menu" | "playing" | "paused" | "finished";
+type Phase = "menu" | "playing" | "paused" | "finished" | "failed";
 type ControlMode = "motion" | "touch";
-type ItemType = "flower" | "gold" | "broken" | "bear" | "web";
+type PlatformKind = "flower" | "gold" | "broken" | "bear";
 
-type Item = {
+type Platform = {
   id: number;
-  type: ItemType;
   x: number;
   y: number;
-  size: number;
-  sway: number;
-};
-
-type GameState = {
-  beeX: number;
-  targetX: number;
-  honey: number;
-  flowers: number;
-  combo: number;
-  bestCombo: number;
-  distance: number;
-  speed: number;
-  items: Item[];
-  particles: Particle[];
-  nextId: number;
-  spawnTimer: number;
-  invincible: number;
-  slowed: number;
-  elapsed: number;
-  lastTime: number;
-  message: string;
-  messageTimer: number;
+  width: number;
+  kind: PlatformKind;
+  used: boolean;
+  breaking: number;
 };
 
 type Particle = {
@@ -46,224 +26,255 @@ type Particle = {
   size: number;
 };
 
+type GameState = {
+  beeX: number;
+  beeY: number;
+  vx: number;
+  vy: number;
+  cameraY: number;
+  honey: number;
+  highest: number;
+  platforms: Platform[];
+  particles: Particle[];
+  invincible: number;
+  message: string;
+  messageTimer: number;
+  lastTime: number;
+  finished: boolean;
+};
+
 const WIDTH = 390;
 const HEIGHT = 780;
-const GOAL = 1000;
+const GOAL = 1800;
+const GRAVITY = 1080;
+const JUMP_SPEED = 525;
+const FLOOR_Y = HEIGHT - 96;
 
-function makeInitialState(): GameState {
+function buildPlatforms(): Platform[] {
+  const list: Platform[] = [
+    { id: 0, x: WIDTH / 2, y: 20, width: 118, kind: "flower", used: true, breaking: 0 },
+  ];
+  let y = 108;
+  let x = WIDTH / 2;
+  let id = 1;
+  while (y < GOAL + 180) {
+    const maxShift = y < 420 ? 92 : 128;
+    x += (Math.random() - 0.5) * maxShift * 2;
+    x = Math.max(62, Math.min(WIDTH - 62, x));
+    const progress = y / GOAL;
+    const roll = Math.random();
+    let kind: PlatformKind = "flower";
+    if (y > 260 && roll < 0.11 + progress * 0.08) kind = "broken";
+    else if (y > 480 && roll < 0.18 + progress * 0.09) kind = "bear";
+    else if (roll > 0.88) kind = "gold";
+    list.push({
+      id: id++,
+      x,
+      y,
+      width: kind === "bear" ? 112 : 76 + Math.random() * 34,
+      kind,
+      used: false,
+      breaking: 0,
+    });
+    y += 78 + Math.random() * 27;
+  }
+  return list;
+}
+
+function initialState(): GameState {
   return {
     beeX: WIDTH / 2,
-    targetX: WIDTH / 2,
+    beeY: 54,
+    vx: 0,
+    vy: JUMP_SPEED,
+    cameraY: 0,
     honey: 0,
-    flowers: 0,
-    combo: 0,
-    bestCombo: 0,
-    distance: 0,
-    speed: 215,
-    items: [],
+    highest: 54,
+    platforms: buildPlatforms(),
     particles: [],
-    nextId: 1,
-    spawnTimer: 0,
     invincible: 0,
-    slowed: 0,
-    elapsed: 0,
-    lastTime: 0,
     message: "",
     messageTimer: 0,
+    lastTime: 0,
+    finished: false,
   };
 }
 
-function roundedRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  radius: number,
-) {
-  const r = Math.min(radius, w / 2, h / 2);
+function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const radius = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
   ctx.closePath();
 }
 
-function drawFlower(
+function drawFlowerPlatform(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  gold = false,
-  broken = false,
-) {
-  ctx.save();
-  ctx.translate(x, y);
-  const colors = gold
-    ? ["#fff0a6", "#ffc928"]
-    : broken
-      ? ["#d8c8be", "#a99691"]
-      : ["#fff3f7", "#ff7fa5"];
-  for (let i = 0; i < 6; i += 1) {
-    ctx.save();
-    ctx.rotate((Math.PI * 2 * i) / 6);
-    ctx.fillStyle = colors[i % 2];
-    ctx.beginPath();
-    ctx.ellipse(0, -size * 0.45, size * 0.28, size * 0.46, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  ctx.fillStyle = broken ? "#79685f" : "#ffb21a";
-  ctx.beginPath();
-  ctx.arc(0, 0, size * 0.3, 0, Math.PI * 2);
-  ctx.fill();
-  if (broken) {
-    ctx.strokeStyle = "#6d5b55";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(-size * 0.12, -size * 0.22);
-    ctx.lineTo(size * 0.08, -size * 0.02);
-    ctx.lineTo(-size * 0.03, size * 0.22);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawBear(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = "#8b5a38";
-  ctx.beginPath();
-  ctx.arc(-size * 0.34, -size * 0.35, size * 0.22, 0, Math.PI * 2);
-  ctx.arc(size * 0.34, -size * 0.35, size * 0.22, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(0, 0, size * 0.55, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#d7a374";
-  ctx.beginPath();
-  ctx.ellipse(0, size * 0.16, size * 0.3, size * 0.23, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#33241f";
-  ctx.beginPath();
-  ctx.arc(-size * 0.18, -size * 0.08, 3.4, 0, Math.PI * 2);
-  ctx.arc(size * 0.18, -size * 0.08, 3.4, 0, Math.PI * 2);
-  ctx.arc(0, size * 0.11, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#ffc928";
-  roundedRect(ctx, -size * 0.36, size * 0.43, size * 0.72, size * 0.44, 8);
-  ctx.fill();
-  ctx.fillStyle = "#fff8dc";
-  ctx.font = `700 ${Math.max(11, size * 0.24)}px sans-serif`;
-  ctx.textAlign = "center";
-  ctx.fillText("蜜", 0, size * 0.73);
-  ctx.restore();
-}
-
-function drawWeb(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.strokeStyle = "rgba(255,255,255,.9)";
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 8; i += 1) {
-    const angle = (Math.PI * 2 * i) / 8;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(Math.cos(angle) * size, Math.sin(angle) * size);
-    ctx.stroke();
-  }
-  for (const ring of [0.38, 0.68, 1]) {
-    ctx.beginPath();
-    ctx.arc(0, 0, size * ring, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawBee(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  tilt: number,
-  invincible: boolean,
+  platform: Platform,
+  screenY: number,
   time: number,
 ) {
+  const { x, width, kind } = platform;
+  const wobble = platform.breaking > 0 ? Math.sin(time * 0.07) * 4 : 0;
   ctx.save();
-  ctx.translate(x, y + Math.sin(time * 0.008) * 3);
-  ctx.rotate(tilt * 0.16);
-  if (invincible && Math.floor(time / 80) % 2 === 0) ctx.globalAlpha = 0.42;
+  ctx.translate(wobble, 0);
 
-  const wingBeat = 0.88 + Math.sin(time * 0.04) * 0.18;
-  ctx.fillStyle = "rgba(235, 251, 255, .82)";
-  ctx.strokeStyle = "rgba(119, 174, 190, .5)";
+  ctx.strokeStyle = kind === "gold" ? "#d7a013" : "#559f58";
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, screenY + 8);
+  ctx.quadraticCurveTo(x + 11, screenY + 40, x - 3, screenY + 66);
+  ctx.stroke();
+  ctx.fillStyle = kind === "gold" ? "#ffe66a" : "#77c66f";
+  ctx.beginPath();
+  ctx.ellipse(x + 12, screenY + 37, 15, 7, -0.42, 0, Math.PI * 2);
+  ctx.fill();
+
+  const petalColor = kind === "broken" ? "#c7b5ad" : kind === "gold" ? "#ffe45a" : "#ff84ae";
+  const petalEdge = kind === "broken" ? "#9e8a82" : kind === "gold" ? "#edab16" : "#e95f91";
+  ctx.fillStyle = petalColor;
+  ctx.strokeStyle = petalEdge;
+  ctx.lineWidth = 2.5;
+  for (let i = 0; i < 7; i += 1) {
+    const px = x - width / 2 + 10 + (i * (width - 20)) / 6;
+    ctx.beginPath();
+    ctx.ellipse(px, screenY, width / 8.3, 15, i % 2 ? 0.14 : -0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.fillStyle = kind === "gold" ? "#f4a70c" : kind === "broken" ? "#80716b" : "#ffc22b";
+  roundedRect(ctx, x - width / 2, screenY - 7, width, 15, 8);
+  ctx.fill();
+
+  if (kind === "broken") {
+    ctx.strokeStyle = "#66544e";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, screenY - 7);
+    ctx.lineTo(x + 2, screenY);
+    ctx.lineTo(x - 5, screenY + 8);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBear(ctx: CanvasRenderingContext2D, x: number, y: number, size = 28) {
+  ctx.save();
+  ctx.translate(x, y - 31);
+  ctx.fillStyle = "#875738";
+  ctx.beginPath();
+  ctx.arc(-16, -16, 10, 0, Math.PI * 2);
+  ctx.arc(16, -16, 10, 0, Math.PI * 2);
+  ctx.arc(0, 0, size, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#d8a376";
+  ctx.beginPath();
+  ctx.ellipse(0, 8, 14, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#30231d";
+  ctx.beginPath();
+  ctx.arc(-9, -5, 3, 0, Math.PI * 2);
+  ctx.arc(9, -5, 3, 0, Math.PI * 2);
+  ctx.arc(0, 6, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffc329";
+  roundedRect(ctx, -20, 23, 40, 24, 7);
+  ctx.fill();
+  ctx.fillStyle = "#fff6d0";
+  ctx.font = "900 11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("蜜", 0, 40);
+  ctx.restore();
+}
+
+function drawBee(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, time: number, blink: boolean) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.max(-0.24, Math.min(0.24, vx / 800)));
+  if (blink && Math.floor(time / 90) % 2 === 0) ctx.globalAlpha = 0.38;
+
+  const wing = 0.82 + Math.sin(time * 0.05) * 0.18;
+  ctx.fillStyle = "rgba(239,252,255,.82)";
+  ctx.strokeStyle = "rgba(92,155,173,.45)";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.ellipse(-24, -7, 15 * wingBeat, 27, -0.68, 0, Math.PI * 2);
-  ctx.ellipse(24, -7, 15 * wingBeat, 27, 0.68, 0, Math.PI * 2);
+  ctx.ellipse(-22, -2, 13 * wing, 25, -0.75, 0, Math.PI * 2);
+  ctx.ellipse(22, -2, 13 * wing, 25, 0.75, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = "#ffca28";
+  ctx.fillStyle = "#ffcb29";
   ctx.beginPath();
-  ctx.ellipse(0, 2, 25, 34, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 4, 23, 29, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = "#45362c";
-  ctx.fillRect(-27, -3, 54, 9);
-  ctx.fillRect(-25, 16, 50, 8);
+  ctx.fillStyle = "#403128";
+  ctx.fillRect(-25, 1, 50, 8);
+  ctx.fillRect(-22, 16, 44, 7);
   ctx.restore();
+  ctx.fillStyle = "#ffdf62";
+  ctx.beginPath();
+  ctx.arc(0, -17, 21, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2f251f";
+  ctx.beginPath();
+  ctx.arc(-7, -19, 3.2, 0, Math.PI * 2);
+  ctx.arc(7, -19, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#2f251f";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, -15, 6, 0.1, Math.PI - 0.1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-8, -34);
+  ctx.quadraticCurveTo(-13, -46, -10, -51);
+  ctx.moveTo(8, -34);
+  ctx.quadraticCurveTo(13, -46, 10, -51);
+  ctx.stroke();
+  ctx.fillStyle = "#2f251f";
+  ctx.beginPath();
+  ctx.arc(-10, -51, 2.8, 0, Math.PI * 2);
+  ctx.arc(10, -51, 2.8, 0, Math.PI * 2);
+  ctx.fill();
 
-  ctx.fillStyle = "#ffdd5d";
-  ctx.beginPath();
-  ctx.arc(0, -22, 24, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#30251f";
-  ctx.beginPath();
-  ctx.arc(-8, -24, 3.5, 0, Math.PI * 2);
-  ctx.arc(8, -24, 3.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#30251f";
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(0, -19, 7, 0.2, Math.PI - 0.2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(-10, -42);
-  ctx.quadraticCurveTo(-16, -53, -12, -59);
-  ctx.moveTo(10, -42);
-  ctx.quadraticCurveTo(16, -53, 12, -59);
-  ctx.stroke();
-  ctx.fillStyle = "#30251f";
-  ctx.beginPath();
-  ctx.arc(-12, -59, 3, 0, Math.PI * 2);
-  ctx.arc(12, -59, 3, 0, Math.PI * 2);
-  ctx.fill();
+  if (vy > 0) {
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    ctx.beginPath();
+    ctx.arc(-7, 39, 3, 0, Math.PI * 2);
+    ctx.arc(8, 46, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
 function GameCanvas({
   phase,
   controlMode,
-  onFinish,
-  onStats,
   resetToken,
+  onStats,
+  onFinish,
+  onFail,
 }: {
   phase: Phase;
   controlMode: ControlMode;
-  onFinish: (honey: number, flowers: number, bestCombo: number) => void;
-  onStats: (honey: number, flowers: number, distance: number, message: string) => void;
   resetToken: number;
+  onStats: (honey: number, height: number, message: string) => void;
+  onFinish: (honey: number, height: number) => void;
+  onFail: (honey: number, height: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef<GameState>(makeInitialState());
-  const frameRef = useRef<number>(0);
-  const orientationRef = useRef({ gamma: 0, baseline: 0, calibrated: false });
-  const keysRef = useRef({ left: false, right: false });
-  const pointerRef = useRef({ active: false, x: WIDTH / 2 });
+  const stateRef = useRef<GameState>(initialState());
   const phaseRef = useRef(phase);
+  const frameRef = useRef(0);
+  const orientationRef = useRef({ gamma: 0, baseline: 0, calibrated: false });
+  const pointerRef = useRef({ active: false, x: WIDTH / 2 });
+  const keysRef = useRef({ left: false, right: false });
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -271,35 +282,35 @@ function GameCanvas({
   }, [phase]);
 
   useEffect(() => {
-    stateRef.current = makeInitialState();
+    stateRef.current = initialState();
     orientationRef.current.calibrated = false;
   }, [resetToken]);
 
   useEffect(() => {
-    const onOrientation = (event: DeviceOrientationEvent) => {
+    const orientation = (event: DeviceOrientationEvent) => {
       if (typeof event.gamma !== "number") return;
-      const o = orientationRef.current;
-      o.gamma = event.gamma;
-      if (!o.calibrated) {
-        o.baseline = event.gamma;
-        o.calibrated = true;
+      const sensor = orientationRef.current;
+      sensor.gamma = event.gamma;
+      if (!sensor.calibrated) {
+        sensor.baseline = event.gamma;
+        sensor.calibrated = true;
       }
     };
-    const onKeyDown = (event: KeyboardEvent) => {
+    const keydown = (event: KeyboardEvent) => {
       if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") keysRef.current.left = true;
       if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") keysRef.current.right = true;
     };
-    const onKeyUp = (event: KeyboardEvent) => {
+    const keyup = (event: KeyboardEvent) => {
       if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") keysRef.current.left = false;
       if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") keysRef.current.right = false;
     };
-    window.addEventListener("deviceorientation", onOrientation);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("deviceorientation", orientation);
+    window.addEventListener("keydown", keydown);
+    window.addEventListener("keyup", keyup);
     return () => {
-      window.removeEventListener("deviceorientation", onOrientation);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("deviceorientation", orientation);
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keyup", keyup);
     };
   }, []);
 
@@ -309,15 +320,15 @@ function GameCanvas({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const spawnBurst = (state: GameState, x: number, y: number, color: string, count = 9) => {
+    const burst = (state: GameState, x: number, y: number, color: string, count = 10) => {
       for (let i = 0; i < count; i += 1) {
-        const a = Math.random() * Math.PI * 2;
-        const force = 30 + Math.random() * 70;
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 35 + Math.random() * 80;
         state.particles.push({
           x,
           y,
-          vx: Math.cos(a) * force,
-          vy: Math.sin(a) * force - 20,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
           life: 0.65 + Math.random() * 0.35,
           color,
           size: 2 + Math.random() * 4,
@@ -325,89 +336,49 @@ function GameCanvas({
       }
     };
 
-    const spawnRow = (state: GameState) => {
-      const progress = Math.min(1, state.distance / GOAL);
-      const lanes = [78, 156, 234, 312];
-      const roll = Math.random();
-      const obstacleChance = 0.18 + progress * 0.2;
-      let type: ItemType = "flower";
-      if (roll < obstacleChance * 0.36) type = "broken";
-      else if (roll < obstacleChance * 0.64) type = "bear";
-      else if (roll < obstacleChance) type = "web";
-      else if (roll > 0.92) type = "gold";
-
-      const lane = lanes[Math.floor(Math.random() * lanes.length)];
-      state.items.push({
-        id: state.nextId++,
-        type,
-        x: lane,
-        y: -55,
-        size: type === "bear" ? 42 : type === "web" ? 31 : 25,
-        sway: Math.random() * Math.PI * 2,
-      });
-
-      if (type === "flower" && Math.random() > 0.52) {
-        const second = lanes.filter((x) => Math.abs(x - lane) >= 70);
-        state.items.push({
-          id: state.nextId++,
-          type: Math.random() > 0.86 ? "gold" : "flower",
-          x: second[Math.floor(Math.random() * second.length)],
-          y: -55,
-          size: 25,
-          sway: Math.random() * Math.PI * 2,
-        });
-      }
-    };
+    const toScreenY = (worldY: number, cameraY: number) => FLOOR_Y - (worldY - cameraY);
 
     const drawBackground = (state: GameState, time: number) => {
+      const progress = Math.min(1, state.cameraY / GOAL);
       const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-      gradient.addColorStop(0, "#79d8f2");
-      gradient.addColorStop(0.4, "#b8eddf");
-      gradient.addColorStop(1, "#fff4b7");
+      gradient.addColorStop(0, progress > 0.55 ? "#6ab8ee" : "#72d2ee");
+      gradient.addColorStop(0.55, "#bcecdf");
+      gradient.addColorStop(1, "#fff0a8");
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
 
-      const scroll = (state.distance * 2.7) % 150;
-      ctx.fillStyle = "rgba(255,255,255,.58)";
+      const cloudOffset = (state.cameraY * 0.48) % 170;
+      ctx.fillStyle = "rgba(255,255,255,.62)";
       for (let i = -1; i < 7; i += 1) {
-        const y = i * 150 + scroll;
+        const y = i * 170 + cloudOffset;
+        const x = 25 + ((i * 97) % 285);
         ctx.beginPath();
-        ctx.ellipse(42 + ((i * 83) % 290), y, 42, 18, 0, 0, Math.PI * 2);
-        ctx.ellipse(76 + ((i * 83) % 290), y + 2, 31, 15, 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, 35, 15, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + 31, y + 2, 27, 12, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + 15, y - 10, 22, 17, 0, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      ctx.fillStyle = "rgba(91,181,89,.28)";
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(52, 0);
-      ctx.bezierCurveTo(85, 170, 10, 325, 58, 505);
-      ctx.bezierCurveTo(80, 610, 40, 700, 68, 780);
-      ctx.lineTo(0, 780);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(WIDTH, 0);
-      ctx.lineTo(WIDTH - 52, 0);
-      ctx.bezierCurveTo(WIDTH - 85, 170, WIDTH - 10, 325, WIDTH - 58, 505);
-      ctx.bezierCurveTo(WIDTH - 80, 610, WIDTH - 40, 700, WIDTH - 68, 780);
-      ctx.lineTo(WIDTH, 780);
-      ctx.closePath();
-      ctx.fill();
-
-      const flowerScroll = (state.distance * 5.1) % 95;
-      for (let i = -1; i < 10; i += 1) {
-        const y = i * 95 + flowerScroll;
-        drawFlower(ctx, 21 + Math.sin(i * 2.1) * 6, y, 7, i % 4 === 0);
-        drawFlower(ctx, WIDTH - 20 + Math.cos(i * 1.7) * 7, y + 38, 6, false);
-      }
-
-      ctx.fillStyle = "rgba(255,255,255,.22)";
-      for (let i = 0; i < 7; i += 1) {
-        const x = 55 + i * 47;
-        const y = (time * 0.035 + i * 127) % HEIGHT;
+      ctx.fillStyle = "rgba(255,246,182,.45)";
+      for (let i = 0; i < 9; i += 1) {
+        const x = 28 + i * 43;
+        const y = (time * 0.018 + i * 101 + state.cameraY * 0.7) % HEIGHT;
         ctx.beginPath();
         ctx.arc(x, y, 2 + (i % 3), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (state.cameraY < 280) {
+        ctx.fillStyle = "rgba(74,159,76,.28)";
+        ctx.beginPath();
+        ctx.moveTo(0, HEIGHT);
+        ctx.quadraticCurveTo(80, HEIGHT - 150 + state.cameraY * 0.28, 170, HEIGHT);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(WIDTH, HEIGHT);
+        ctx.quadraticCurveTo(WIDTH - 75, HEIGHT - 190 + state.cameraY * 0.28, WIDTH - 190, HEIGHT);
+        ctx.closePath();
         ctx.fill();
       }
     };
@@ -416,124 +387,157 @@ function GameCanvas({
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawBackground(state, time);
 
-      for (const item of state.items) {
-        if (item.type === "flower") drawFlower(ctx, item.x, item.y, item.size);
-        else if (item.type === "gold") drawFlower(ctx, item.x, item.y, item.size, true);
-        else if (item.type === "broken") drawFlower(ctx, item.x, item.y, item.size, false, true);
-        else if (item.type === "bear") drawBear(ctx, item.x, item.y, item.size);
-        else drawWeb(ctx, item.x, item.y, item.size);
+      const visiblePlatforms = state.platforms.filter((p) => {
+        const screenY = toScreenY(p.y, state.cameraY);
+        return screenY > -100 && screenY < HEIGHT + 90 && p.breaking < 0.38;
+      });
+      for (const platform of visiblePlatforms) {
+        const screenY = toScreenY(platform.y, state.cameraY);
+        drawFlowerPlatform(ctx, platform, screenY, time);
+        if (platform.kind === "bear") drawBear(ctx, platform.x, screenY);
       }
 
-      for (const p of state.particles) {
-        ctx.globalAlpha = Math.max(0, p.life);
-        ctx.fillStyle = p.color;
+      for (const particle of state.particles) {
+        ctx.globalAlpha = Math.max(0, particle.life);
+        ctx.fillStyle = particle.color;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
 
-      const tilt = (state.targetX - state.beeX) / 55;
-      drawBee(ctx, state.beeX, HEIGHT - 112, tilt, state.invincible > 0, time);
+      const beeScreenY = toScreenY(state.beeY, state.cameraY);
+      drawBee(ctx, state.beeX, beeScreenY, state.vx, state.vy, time, state.invincible > 0);
 
-      if (state.slowed > 0) {
-        ctx.fillStyle = "rgba(255,255,255,.16)";
-        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+      if (state.highest > GOAL - 280) {
+        const hiveY = toScreenY(GOAL + 105, state.cameraY);
+        if (hiveY > -100 && hiveY < HEIGHT + 100) {
+          ctx.fillStyle = "#e99b13";
+          ctx.beginPath();
+          ctx.ellipse(WIDTH / 2, hiveY, 66, 72, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#b96a0d";
+          ctx.lineWidth = 7;
+          for (const offset of [-30, -10, 12, 34]) {
+            ctx.beginPath();
+            ctx.moveTo(WIDTH / 2 - 52, hiveY + offset);
+            ctx.lineTo(WIDTH / 2 + 52, hiveY + offset);
+            ctx.stroke();
+          }
+          ctx.fillStyle = "#4a2c16";
+          ctx.beginPath();
+          ctx.ellipse(WIDTH / 2, hiveY + 28, 19, 25, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "rgba(255,255,255,.88)";
+          roundedRect(ctx, WIDTH / 2 - 58, hiveY - 112, 116, 34, 17);
+          ctx.fill();
+          ctx.fillStyle = "#87540c";
+          ctx.font = "900 14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("云上蜂巢", WIDTH / 2, hiveY - 90);
+        }
       }
     };
 
     const update = (state: GameState, dt: number, time: number) => {
-      state.elapsed += dt;
       state.invincible = Math.max(0, state.invincible - dt);
-      state.slowed = Math.max(0, state.slowed - dt);
       state.messageTimer = Math.max(0, state.messageTimer - dt);
       if (state.messageTimer <= 0) state.message = "";
 
-      let movement = 0;
-      if (keysRef.current.left) movement -= 1;
-      if (keysRef.current.right) movement += 1;
-
+      let input = 0;
+      if (keysRef.current.left) input -= 1;
+      if (keysRef.current.right) input += 1;
       if (controlMode === "motion" && orientationRef.current.calibrated) {
         const raw = orientationRef.current.gamma - orientationRef.current.baseline;
-        const adjusted = Math.abs(raw) < 4 ? 0 : raw - Math.sign(raw) * 4;
-        movement = Math.max(-1, Math.min(1, adjusted / 20));
-        state.targetX += movement * 290 * dt;
+        input = Math.abs(raw) < 4 ? 0 : Math.max(-1, Math.min(1, (raw - Math.sign(raw) * 4) / 18));
       } else if (pointerRef.current.active) {
-        state.targetX = pointerRef.current.x;
-      } else if (movement !== 0) {
-        state.targetX += movement * 300 * dt;
+        input = Math.max(-1, Math.min(1, (pointerRef.current.x - state.beeX) / 56));
       }
 
-      state.targetX = Math.max(50, Math.min(WIDTH - 50, state.targetX));
-      state.beeX += (state.targetX - state.beeX) * Math.min(1, dt * 9.5);
+      const targetVx = input * 275;
+      state.vx += (targetVx - state.vx) * Math.min(1, dt * 8);
+      if (input === 0) state.vx *= Math.pow(0.88, dt * 60);
 
-      const effectiveSpeed = state.slowed > 0 ? state.speed * 0.55 : state.speed;
-      state.distance = Math.min(GOAL, state.distance + dt * 15.2);
-      state.speed = 215 + Math.min(80, state.distance * 0.075);
-      state.spawnTimer -= dt;
-      if (state.spawnTimer <= 0) {
-        spawnRow(state);
-        state.spawnTimer = Math.max(0.34, 0.64 - state.distance / 4200) + Math.random() * 0.12;
-      }
+      const oldY = state.beeY;
+      const oldFoot = oldY - 28;
+      state.beeX += state.vx * dt;
+      if (state.beeX < -24) state.beeX = WIDTH + 24;
+      if (state.beeX > WIDTH + 24) state.beeX = -24;
+      state.vy -= GRAVITY * dt;
+      state.beeY += state.vy * dt;
+      const newFoot = state.beeY - 28;
 
-      const beeY = HEIGHT - 112;
-      const remaining: Item[] = [];
-      for (const item of state.items) {
-        item.y += effectiveSpeed * dt;
-        if (item.type === "gold") item.x += Math.sin(time * 0.004 + item.sway) * 0.42;
-        const hitDistance = Math.hypot(item.x - state.beeX, item.y - beeY);
-        const hitRadius = item.type === "bear" ? 46 : item.type === "web" ? 38 : 35;
-        if (hitDistance < hitRadius && state.invincible <= 0) {
-          if (item.type === "flower" || item.type === "gold") {
-            const points = item.type === "gold" ? 50 : 10;
-            const petals = item.type === "gold" ? 3 : 1;
-            state.combo += 1;
-            state.bestCombo = Math.max(state.bestCombo, state.combo);
-            state.honey += points + Math.min(40, Math.floor(state.combo / 5) * 5);
-            state.flowers += petals;
-            state.message = item.type === "gold" ? "金色花蜜 +50" : state.combo >= 5 ? `${state.combo} 连采！` : "+10 花蜜";
-            state.messageTimer = 0.65;
-            spawnBurst(state, item.x, item.y, item.type === "gold" ? "#ffd84e" : "#ff8ab1", 11);
-          } else if (item.type === "broken") {
-            state.flowers = Math.max(0, state.flowers - 2);
-            state.combo = 0;
-            state.invincible = 0.8;
-            state.message = "花朵破碎 -2";
-            state.messageTimer = 1;
-            spawnBurst(state, item.x, item.y, "#b49d92", 8);
-          } else if (item.type === "bear") {
-            const loss = Math.min(state.honey, Math.max(50, Math.min(300, Math.round(state.honey * 0.3))));
-            state.honey -= loss;
-            state.combo = 0;
-            state.invincible = 1.5;
-            state.message = `偷蜜熊 -${loss}`;
-            state.messageTimer = 1.2;
-            spawnBurst(state, item.x, item.y, "#ffbd21", 14);
-          } else {
-            state.combo = 0;
-            state.slowed = 1.5;
-            state.invincible = 0.65;
-            state.message = "被蛛网缠住了！";
-            state.messageTimer = 1.2;
+      if (state.vy < 0) {
+        let landing: Platform | undefined;
+        for (const platform of state.platforms) {
+          if (platform.breaking >= 0.38) continue;
+          const half = platform.width / 2 + 13;
+          if (
+            oldFoot >= platform.y &&
+            newFoot <= platform.y &&
+            state.beeX >= platform.x - half &&
+            state.beeX <= platform.x + half
+          ) {
+            landing = platform;
+            break;
           }
-          continue;
         }
-        if (item.y < HEIGHT + 80) remaining.push(item);
+        if (landing) {
+          state.beeY = landing.y + 28;
+          state.vy = JUMP_SPEED;
+          const screenY = toScreenY(landing.y, state.cameraY);
+          if (landing.kind === "broken") {
+            landing.breaking = 0.01;
+            state.message = "花朵碎了，快跳！";
+            state.messageTimer = 0.9;
+            burst(state, landing.x, screenY, "#c7aaa0", 13);
+          } else if (landing.kind === "bear" && state.invincible <= 0) {
+            const loss = Math.min(state.honey, Math.max(20, Math.round(state.honey * 0.3)));
+            state.honey -= loss;
+            state.invincible = 1.4;
+            state.vx = state.beeX < landing.x ? -230 : 230;
+            state.message = `偷蜜熊 -${loss}`;
+            state.messageTimer = 1.1;
+            burst(state, landing.x, screenY - 25, "#ffbd23", 15);
+          } else if (!landing.used) {
+            landing.used = true;
+            const gain = landing.kind === "gold" ? 30 : 10;
+            state.honey += gain;
+            state.message = landing.kind === "gold" ? "金色花蜜 +30" : "采到花蜜 +10";
+            state.messageTimer = 0.65;
+            burst(state, landing.x, screenY, landing.kind === "gold" ? "#ffe052" : "#ff8db3", 10);
+          }
+        }
       }
-      state.items = remaining;
+
+      for (const platform of state.platforms) {
+        if (platform.breaking > 0) platform.breaking += dt;
+      }
+
+      state.highest = Math.max(state.highest, state.beeY);
+      const targetCamera = Math.max(0, state.highest - 350);
+      state.cameraY += (targetCamera - state.cameraY) * Math.min(1, dt * 4.2);
 
       state.particles = state.particles
-        .map((p) => ({ ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + 80 * dt, life: p.life - dt }))
+        .map((p) => ({ ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + 70 * dt, life: p.life - dt }))
         .filter((p) => p.life > 0);
 
-      onStats(state.honey, state.flowers, state.distance, state.message);
-      if (state.distance >= GOAL) onFinish(state.honey, state.flowers, state.bestCombo);
+      onStats(state.honey, state.highest, state.message);
+      if (!state.finished && state.highest >= GOAL) {
+        state.finished = true;
+        onFinish(state.honey, state.highest);
+      } else if (!state.finished && state.beeY < state.cameraY - 85) {
+        state.finished = true;
+        onFail(state.honey, state.highest);
+      }
+
+      void time;
     };
 
     const loop = (time: number) => {
       const state = stateRef.current;
       if (!state.lastTime) state.lastTime = time;
-      const dt = Math.min(0.034, (time - state.lastTime) / 1000);
+      const dt = Math.min(0.032, (time - state.lastTime) / 1000);
       state.lastTime = time;
       if (phaseRef.current === "playing") update(state, dt, time);
       draw(state, time);
@@ -541,7 +545,7 @@ function GameCanvas({
     };
     frameRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frameRef.current);
-  }, [controlMode, onFinish, onStats, resetToken]);
+  }, [controlMode, onFail, onFinish, onStats, resetToken]);
 
   const setPointer = (clientX: number) => {
     const canvas = canvasRef.current;
@@ -556,21 +560,15 @@ function GameCanvas({
       width={WIDTH}
       height={HEIGHT}
       className="game-canvas"
-      aria-label="小蜜蜂采蜜游戏画面"
+      aria-label="小蜜蜂踩着花朵向上跳的游戏画面"
       onPointerDown={(event) => {
         pointerRef.current.active = true;
         setPointer(event.clientX);
         event.currentTarget.setPointerCapture(event.pointerId);
       }}
-      onPointerMove={(event) => {
-        if (pointerRef.current.active) setPointer(event.clientX);
-      }}
-      onPointerUp={() => {
-        pointerRef.current.active = false;
-      }}
-      onPointerCancel={() => {
-        pointerRef.current.active = false;
-      }}
+      onPointerMove={(event) => pointerRef.current.active && setPointer(event.clientX)}
+      onPointerUp={() => { pointerRef.current.active = false; }}
+      onPointerCancel={() => { pointerRef.current.active = false; }}
     />
   );
 }
@@ -579,55 +577,54 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
-  const [stats, setStats] = useState({ honey: 0, flowers: 0, distance: 0, message: "" });
-  const [result, setResult] = useState({ honey: 0, flowers: 0, bestCombo: 0 });
-  const [motionStatus, setMotionStatus] = useState<"idle" | "ready" | "unavailable">("idle");
+  const [stats, setStats] = useState({ honey: 0, height: 0, message: "" });
+  const [result, setResult] = useState({ honey: 0, height: 0 });
+  const [motionUnavailable, setMotionUnavailable] = useState(false);
   const finishLock = useRef(false);
 
-  const onStats = useCallback((honey: number, flowers: number, distance: number, message: string) => {
+  const onStats = useCallback((honey: number, height: number, message: string) => {
     setStats((previous) => {
-      if (
-        previous.honey === honey &&
-        previous.flowers === flowers &&
-        Math.floor(previous.distance) === Math.floor(distance) &&
-        previous.message === message
-      ) return previous;
-      return { honey, flowers, distance, message };
+      if (previous.honey === honey && Math.floor(previous.height) === Math.floor(height) && previous.message === message) return previous;
+      return { honey, height, message };
     });
   }, []);
 
-  const onFinish = useCallback((honey: number, flowers: number, bestCombo: number) => {
+  const onFinish = useCallback((honey: number, height: number) => {
     if (finishLock.current) return;
     finishLock.current = true;
-    const finalHoney = honey + flowers * 10;
-    setResult({ honey: finalHoney, flowers, bestCombo });
+    setResult({ honey, height });
     setPhase("finished");
   }, []);
 
-  const requestMotion = async () => {
-    try {
-      const OrientationEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
-        requestPermission?: () => Promise<"granted" | "denied">;
-      };
-      if (typeof OrientationEvent === "undefined") throw new Error("unsupported");
-      if (typeof OrientationEvent.requestPermission === "function") {
-        const permission = await OrientationEvent.requestPermission();
-        if (permission !== "granted") throw new Error("denied");
-      }
-      setMotionStatus("ready");
-      setControlMode("motion");
-      startGame();
-    } catch {
-      setMotionStatus("unavailable");
-      setControlMode("touch");
-    }
-  };
+  const onFail = useCallback((honey: number, height: number) => {
+    if (finishLock.current) return;
+    finishLock.current = true;
+    setResult({ honey, height });
+    setPhase("failed");
+  }, []);
 
   const startGame = () => {
     finishLock.current = false;
-    setStats({ honey: 0, flowers: 0, distance: 0, message: "" });
+    setStats({ honey: 0, height: 0, message: "" });
     setResetToken((value) => value + 1);
     setPhase("playing");
+  };
+
+  const requestMotion = async () => {
+    try {
+      const MotionEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+        requestPermission?: () => Promise<"granted" | "denied">;
+      };
+      if (typeof MotionEvent.requestPermission === "function") {
+        const permission = await MotionEvent.requestPermission();
+        if (permission !== "granted") throw new Error("denied");
+      }
+      setControlMode("motion");
+      startGame();
+    } catch {
+      setMotionUnavailable(true);
+      setControlMode("touch");
+    }
   };
 
   const playTouch = () => {
@@ -635,21 +632,21 @@ export default function Home() {
     startGame();
   };
 
-  const stars = result.honey >= 900 ? 3 : result.honey >= 520 ? 2 : 1;
+  const stars = result.honey >= 180 ? 3 : result.honey >= 90 ? 2 : 1;
 
   return (
     <main className="page-shell">
       <section className="brand-panel" aria-label="游戏介绍">
         <div className="brand-mark"><span>蜜</span></div>
-        <p className="eyebrow">HONEYBEE ADVENTURE</p>
-        <h1>小蜜蜂<br /><em>采蜜世界</em></h1>
-        <p className="brand-copy">左右晃动手机，穿过花海，把甜甜的花蜜安全送回家。</p>
+        <p className="eyebrow">HONEYBEE JUMP</p>
+        <h1>小蜜蜂<br /><em>花间跳跃</em></h1>
+        <p className="brand-copy">小蜜蜂会一直向上跳。左右晃动手机，让它稳稳踩住一朵又一朵花，飞回云上的蜂巢。</p>
         <div className="control-tip">
           <div className="phone-tilt" aria-hidden="true"><span>↔</span></div>
-          <div><strong>体感控制</strong><small>向左或向右倾斜手机</small></div>
+          <div><strong>只控制左右</strong><small>跳跃与上升完全自动</small></div>
         </div>
         <div className="legend">
-          <span><i className="dot flower-dot" />采花加蜜</span>
+          <span><i className="dot flower-dot" />踩花向上跳</span>
           <span><i className="dot bear-dot" />躲开偷蜜熊</span>
         </div>
       </section>
@@ -658,45 +655,44 @@ export default function Home() {
         <GameCanvas
           phase={phase}
           controlMode={controlMode}
-          onFinish={onFinish}
-          onStats={onStats}
           resetToken={resetToken}
+          onStats={onStats}
+          onFinish={onFinish}
+          onFail={onFail}
         />
 
         <header className="game-hud" aria-live="polite">
-          <div className="hud-pill"><span className="honey-drop" /> <b>{stats.honey}</b></div>
-          <div className="distance-track"><span style={{ width: `${Math.min(100, stats.distance / 10)}%` }} /></div>
-          <div className="hud-pill flower-pill"><span>🌸</span> <b>{stats.flowers}</b></div>
+          <div className="hud-pill"><span className="honey-drop" /><b>{stats.honey}</b></div>
+          <div className="distance-track"><span style={{ width: `${Math.min(100, (stats.height / GOAL) * 100)}%` }} /></div>
+          <div className="hud-pill flower-pill"><span>↥</span><b>{Math.floor(stats.height)}m</b></div>
         </header>
 
         {stats.message && phase === "playing" && <div className="game-message">{stats.message}</div>}
 
         {phase === "menu" && (
           <div className="game-overlay intro-overlay">
-            <div className="mini-logo">小蜜蜂采蜜世界</div>
+            <div className="mini-logo">小蜜蜂 · 花间跳跃</div>
             <div className="hero-bee" aria-hidden="true"><span className="wing left" /><span className="wing right" /><b>●</b></div>
             <div className="intro-card">
-              <p className="intro-kicker">准备好了吗？</p>
-              <h2>晃动手机<br />飞进甜蜜花海</h2>
-              <div className="tilt-demo" aria-hidden="true"><span>⌁</span><b>↔</b><span>⌁</span></div>
-              <button className="primary-button" onClick={requestMotion}>开启体感 · 出发</button>
+              <p className="intro-kicker">踩住花朵，一路向上</p>
+              <h2>小蜜蜂自动跳<br />你只管左右晃</h2>
+              <div className="tilt-demo" aria-hidden="true"><span>🌸</span><b>↔</b><span>🌸</span></div>
+              <button className="primary-button" onClick={requestMotion}>开启体感 · 起跳</button>
               <button className="text-button" onClick={playTouch}>触屏 / 电脑试玩</button>
-              {motionStatus === "unavailable" && <p className="permission-note">当前设备未开启体感，已为你切换触屏模式。</p>}
+              {motionUnavailable && <p className="permission-note">当前设备未开启体感，请使用触屏模式。</p>}
             </div>
           </div>
         )}
 
-        {phase === "playing" && (
-          <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>
-        )}
+        {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
 
         {phase === "paused" && (
           <div className="game-overlay pause-overlay">
             <div className="modal-card compact-card">
-              <span className="modal-icon">🍯</span>
-              <h2>先歇一会儿</h2>
-              <p>蜂蜜会在这里等你。</p>
-              <button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button>
+              <span className="modal-icon">🌸</span>
+              <h2>停在花朵上</h2>
+              <p>准备好再继续向上跳。</p>
+              <button className="primary-button" onClick={() => setPhase("playing")}>继续跳跃</button>
               <button className="text-button" onClick={() => setPhase("menu")}>返回首页</button>
             </div>
           </div>
@@ -705,25 +701,33 @@ export default function Home() {
         {phase === "finished" && (
           <div className="game-overlay result-overlay">
             <div className="modal-card result-card">
-              <p className="intro-kicker">平安回到蜂巢！</p>
-              <h2>甜蜜大丰收</h2>
+              <p className="intro-kicker">抵达云上蜂巢！</p>
+              <h2>跳跃成功</h2>
               <div className="stars" aria-label={`获得${stars}颗星`}>
                 {[0, 1, 2].map((index) => <span key={index} className={index < stars ? "lit" : ""}>★</span>)}
               </div>
               <div className="score-number"><span className="honey-drop large" />{result.honey}</div>
-              <div className="result-grid">
-                <div><small>剩余花朵</small><strong>{result.flowers}</strong></div>
-                <div><small>最高连采</small><strong>{result.bestCombo}</strong></div>
-              </div>
-              <button className="primary-button" onClick={startGame}>再飞一次</button>
+              <div className="result-grid"><div><small>最高高度</small><strong>{Math.floor(result.height)}m</strong></div><div><small>成功到达</small><strong>蜂巢</strong></div></div>
+              <button className="primary-button" onClick={startGame}>再跳一次</button>
               <button className="text-button" onClick={() => setPhase("menu")}>返回花园</button>
             </div>
           </div>
         )}
 
-        {phase === "playing" && controlMode === "touch" && (
-          <div className="touch-hint">按住并左右滑动</div>
+        {phase === "failed" && (
+          <div className="game-overlay result-overlay">
+            <div className="modal-card result-card">
+              <span className="modal-icon">🍃</span>
+              <p className="intro-kicker">没踩到花朵</p>
+              <h2>再试一次吧</h2>
+              <div className="result-grid fail-grid"><div><small>本次花蜜</small><strong>{result.honey}</strong></div><div><small>最高高度</small><strong>{Math.floor(result.height)}m</strong></div></div>
+              <button className="primary-button" onClick={startGame}>重新起跳</button>
+              <button className="text-button" onClick={() => setPhase("menu")}>返回花园</button>
+            </div>
+          </div>
         )}
+
+        {phase === "playing" && controlMode === "touch" && <div className="touch-hint">按住画面左右移动，跳跃会自动进行</div>}
       </section>
     </main>
   );
