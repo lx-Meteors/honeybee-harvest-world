@@ -568,9 +568,14 @@ export default function Home() {
   const [resetToken, setResetToken] = useState(0);
   const [stats, setStats] = useState({ honey: 0, height: 0, message: "" });
   const [result, setResult] = useState({ honey: 0, height: 0 });
-  const [best, setBest] = useState(() => typeof window === "undefined" ? 0 : Number(localStorage.getItem("honeybee-best") || 0));
+  const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
   const finishLock = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setBest(Number(localStorage.getItem("honeybee-best") || 0)), 500);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const onStats = useCallback((honey: number, height: number, message: string) => {
     setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.message === message ? old : { honey, height, message });

@@ -135,7 +135,14 @@ button { font: inherit; }
 
 @media (max-width: 760px) {
   body { background: #9de1da; }
-  .page-shell { display: grid; place-items: center; padding: 0; min-height: 100dvh; }
+  .page-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    gap: 0;
+    padding: 0;
+    min-height: 100dvh;
+  }
   .brand-panel { display: none; }
   .game-phone { width: min(100vw, 75dvh); height: auto; max-height: 100dvh; aspect-ratio: 3 / 4; border-radius: 0; border-width: 0; box-shadow: 0 0 50px rgba(25,89,72,.22); }
 }
