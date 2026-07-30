@@ -1460,32 +1460,47 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
   ctx.restore();
 }
 
-function drawBear(ctx: CanvasRenderingContext2D, x: number, y: number) {
+function drawRedFuzzFallback(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
   ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = "#89593a";
+  ctx.translate(x, y + Math.sin(time * .006) * 3);
+  ctx.rotate(Math.sin(time * .004) * .035);
+  ctx.fillStyle = "#e84a42";
+  ctx.strokeStyle = "#332d2a";
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.arc(-17, -18, 10, 0, Math.PI * 2);
-  ctx.arc(17, -18, 10, 0, Math.PI * 2);
-  ctx.arc(0, 0, 29, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, 27, 23, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#d8a477";
+  ctx.stroke();
+  for (let index = 0; index < 12; index += 1) {
+    const angle = index / 12 * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * 25, Math.sin(angle) * 21);
+    ctx.lineTo(Math.cos(angle) * 32, Math.sin(angle) * 28);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#fff2c9";
+  ctx.strokeStyle = "#332d2a";
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.ellipse(0, 8, 15, 11, 0, 0, Math.PI * 2);
+  ctx.arc(-8, -3, 10, 0, Math.PI * 2);
+  ctx.arc(10, -1, 6, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#30231d";
+  ctx.stroke();
+  ctx.fillStyle = "#2c2826";
   ctx.beginPath();
-  ctx.arc(-9, -6, 3, 0, Math.PI * 2);
-  ctx.arc(9, -6, 3, 0, Math.PI * 2);
-  ctx.arc(0, 6, 4, 0, Math.PI * 2);
+  ctx.arc(-6, -2, 4, 0, Math.PI * 2);
+  ctx.arc(11, 0, 2.5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#ffc429";
-  roundedRect(ctx, -20, 22, 40, 24, 7);
+  ctx.beginPath();
+  ctx.moveTo(-6, 12);
+  ctx.quadraticCurveTo(1, 17, 8, 11);
+  ctx.stroke();
+  ctx.fillStyle = "#f2b52b";
+  ctx.beginPath();
+  ctx.ellipse(-9, 27, 5, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(9, 27, 5, 7, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff7d4";
-  ctx.font = "900 11px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("蜜", 0, 39);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -2007,9 +2022,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const blueMonsterImage = new Image();
     const backgroundImage = new Image();
     beeImage.src = "/bee-character-flying-final.png";
-    redMonsterImage.src = "/monster-red-fuzz.png";
-    purpleMonsterImage.src = "/monster-purple-jelly.png";
-    blueMonsterImage.src = "/monster-blue-cyclops.png";
+    redMonsterImage.src = "/monster-red-fuzz.png?v=20260730b";
+    purpleMonsterImage.src = "/monster-purple-jelly.png?v=20260730b";
+    blueMonsterImage.src = "/monster-blue-cyclops.png?v=20260730b";
     backgroundImage.src = "/game-background-long.png";
     beeImage.onload = () => { beeImageRef.current = beeImage; };
     redMonsterImage.onload = () => { redMonsterImageRef.current = redMonsterImage; };
@@ -2122,7 +2137,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         if (item.kind === "bear") {
           const redMonsterImage = redMonsterImageRef.current;
           if (redMonsterImage) drawDoodleMonsterSprite(ctx, redMonsterImage, item.x, sy, time, 60);
-          else drawBear(ctx, item.x, sy);
+          else drawRedFuzzFallback(ctx, item.x, sy, time);
         }
         else if (item.kind === "web") drawWeb(ctx, item.x, sy, time);
         else if (item.kind === "blackHole") drawBlackHole(ctx, item.x, sy, time);
