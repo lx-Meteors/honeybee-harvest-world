@@ -77,21 +77,21 @@ type GameState = {
 const WIDTH = 540;
 const HEIGHT = 720;
 const FLOOR_Y = HEIGHT - 74;
-const GRAVITY = 950;
-const JUMP_SPEED = 735;
-const SPRING_SPEED = 1080;
-const ROCKET_SPEED = 830;
-const COPTER_SPEED = 790;
+const GRAVITY = 980;
+const JUMP_SPEED = 760;
+const SPRING_SPEED = 1140;
+const ROCKET_SPEED = 960;
+const COPTER_SPEED = 860;
 const HEIGHT_SCALE = 16;
 const VIEW_SCALE = .72;
 const ROCKET_INTERVAL_METERS = 450;
 const ROCKET_INTERVAL_WORLD = ROCKET_INTERVAL_METERS * HEIGHT_SCALE;
-const ROCKET_FLIGHT_TIME = 2.05;
-const ROCKET_RECOVERY_DISTANCE = 1960;
+const ROCKET_FLIGHT_TIME = 2.65;
+const ROCKET_RECOVERY_DISTANCE = 2520;
 const COPTER_INTERVAL_METERS = 320;
 const COPTER_INTERVAL_WORLD = COPTER_INTERVAL_METERS * HEIGHT_SCALE;
-const COPTER_FLIGHT_TIME = 1.05;
-const COPTER_RECOVERY_DISTANCE = 1080;
+const COPTER_FLIGHT_TIME = 1.45;
+const COPTER_RECOVERY_DISTANCE = 1380;
 const SFX_VOLUME = .66;
 
 let sharedAudioContext: AudioContext | null = null;
@@ -115,6 +115,18 @@ const SOUND_FILES: Partial<Record<SoundKind, string>> = {
   webWind: "/sfx/web-wind.ogg",
   blackHole: "/sfx/black-hole.ogg",
 };
+const SOUND_MIX: Partial<Record<SoundKind, number>> = {
+  bounce: .58,
+  spring: .88,
+  break: .76,
+  honey: .78,
+  rocket: .82,
+  copter: .72,
+  bearWarning: .62,
+  webWind: .68,
+  blackHole: .72,
+  fail: .82,
+};
 
 function playAudioFile(kind: SoundKind) {
   if (typeof window === "undefined") return false;
@@ -125,14 +137,18 @@ function playAudioFile(kind: SoundKind) {
     pool = Array.from({ length: kind === "bounce" ? 4 : 2 }, () => {
       const audio = new Audio(source);
       audio.preload = "auto";
-      audio.volume = SFX_VOLUME;
+      audio.volume = SFX_VOLUME * (SOUND_MIX[kind] ?? .72);
       return audio;
     });
     audioPools.set(kind, pool);
   }
   const audio = pool.find((candidate) => candidate.paused || candidate.ended) ?? pool[0];
   audio.currentTime = 0;
-  audio.volume = SFX_VOLUME;
+  audio.volume = SFX_VOLUME * (SOUND_MIX[kind] ?? .72);
+  audio.playbackRate = kind === "bounce"
+    ? .94 + Math.random() * .1
+    : kind === "spring" ? 1.02
+      : 1;
   void audio.play().catch(() => undefined);
   return true;
 }
@@ -341,16 +357,16 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 function progressionStageAtHeight(meters: number) {
-  return meters < 1200 ? 0
-    : meters < 2400 ? 1
-      : meters < 3800 ? 2
-        : meters < 5200 ? 3
-          : meters < 7000 ? 4
+  return meters < 400 ? 0
+    : meters < 900 ? 1
+      : meters < 1700 ? 2
+        : meters < 2600 ? 3
+          : meters < 3600 ? 4
             : 5;
 }
 
 function linearDifficultyAtHeight(meters: number) {
-  return clampNumber(meters / 8000, 0, 1);
+  return clampNumber(meters / 4300, 0, 1);
 }
 
 function platformPlacementOverlaps(platforms: Platform[], x: number, y: number, width: number) {
@@ -691,7 +707,9 @@ function reachablePlatforms(starts: Platform[], field: Platform[], difficulty: n
   return reachable;
 }
 
-function generateWorld(state: GameState, targetY: number) {
+// Previous chunk-and-row generator kept for side-by-side tuning.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function generateWorldChunkedReference(state: GameState, targetY: number) {
   while (state.generatedTo < targetY) {
     const chunkBottom = state.generatedTo;
     const meters = heightMeters(chunkBottom);
@@ -992,6 +1010,341 @@ function generateWorld(state: GameState, targetY: number) {
   }
 }
 
+/**
+ * Video-matched scatter-field generator.
+ *
+ * The reference run does not read as a route made of rows. It starts with
+ * roughly 15–20 visible boards, then steadily thins to 5–8 boards, mixing
+ * short clusters with open pockets. Every platform is selected from a recent
+ * reachable frontier, so the field stays possible without drawing a single
+ * obvious zig-zag path through the screen.
+ */
+function generateWorld(state: GameState, targetY: number) {
+  while (state.generatedTo < targetY) {
+    const segmentBottom = state.generatedTo;
+    const meters = heightMeters(segmentBottom);
+    const stage = progressionStageAtHeight(meters);
+    const difficulty = linearDifficultyAtHeight(meters);
+    const segmentHeight = randomBetween(900, 1080);
+    const segmentTop = segmentBottom + segmentHeight;
+    const field: Platform[] = [];
+
+    // 0 dense pocket, 1 normal scatter, 2 sparse pocket, 3 edge pocket,
+    // 4 moving-board pocket. Never repeat a sparse pocket directly.
+    const profileRoll = Math.random();
+    let profile = 1;
+    if (profileRoll < .27 - difficulty * .1) profile = 0;
+    else if (difficulty > .16 && profileRoll < .38 + difficulty * .08) profile = 2;
+    else if (difficulty > .24 && profileRoll < .5 + difficulty * .08) profile = 3;
+    else if (difficulty > .28 && profileRoll < .66 + difficulty * .08) profile = 4;
+    if (profile === 2 && state.routePattern === 2) profile = Math.random() < .5 ? 0 : 1;
+    state.routePattern = profile;
+
+    const pushPlatform = (x: number, y: number, width: number, kind: PlatformKind) => {
+      const platform: Platform = {
+        id: state.nextId++,
+        x: clampNumber(x, width / 2 + 7, WIDTH - width / 2 - 7),
+        y,
+        width,
+        kind,
+        used: false,
+        breaking: 0,
+      };
+      if (kind === "moving" || kind === "cloud") {
+        platform.baseX = platform.x;
+        platform.range = 38 + difficulty * 44;
+        platform.speed = .82 + difficulty * .52 + Math.random() * .34;
+        platform.phase = Math.random() * Math.PI * 2;
+      }
+      field.push(platform);
+      return platform;
+    };
+
+    const addRecoveryPlatform = (recoveryY: number, recoveryX: number, clear: () => void) => {
+      if (recoveryY <= 0 || recoveryY > segmentTop) return;
+      const y = Math.max(segmentBottom + 60, recoveryY);
+      field.splice(0, field.length, ...field.filter((platform) => (
+        Math.abs(platform.y - y) >= 42
+        || Math.abs(platform.x - recoveryX) >= (platform.width + 78) / 2 + 18
+      )));
+      pushPlatform(recoveryX, y, 78, "flower");
+      clear();
+    };
+
+    addRecoveryPlatform(state.springTargetY, state.springTargetX, () => { state.springTargetY = -1; });
+    addRecoveryPlatform(state.rocketRecoveryY, state.rocketRecoveryX, () => { state.rocketRecoveryY = 0; });
+    addRecoveryPlatform(state.copterRecoveryY, state.copterRecoveryX, () => { state.copterRecoveryY = 0; });
+
+    const supports = state.platforms.filter((platform) => (
+      isLandingPlatform(platform)
+      && platform.y <= segmentBottom + 24
+      && platform.y > segmentBottom - 380
+    ));
+    if (supports.length === 0) {
+      supports.push({
+        id: -1,
+        x: state.lastPlatformX,
+        y: segmentBottom,
+        width: 78,
+        kind: "flower",
+        used: true,
+        breaking: 0,
+      });
+    }
+
+    const reachableNow = () => reachablePlatforms(supports, field, difficulty);
+    const profileGapScale = profile === 0 ? .76 : profile === 2 ? 1.2 : profile === 3 ? 1.04 : profile === 4 ? .94 : 1;
+    const baseGapMin = (50 + difficulty * 70) * profileGapScale;
+    const baseGapMax = (72 + difficulty * 94) * profileGapScale;
+    let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
+    let generatedCount = 0;
+
+    const randomScatterX = () => {
+      if (profile === 3 && Math.random() < .78) {
+        const left = Math.random() < .5;
+        return left ? randomBetween(34, 166) : randomBetween(WIDTH - 166, WIDTH - 34);
+      }
+      return randomBetween(34, WIDTH - 34);
+    };
+
+    while (y < segmentTop - 46 && generatedCount < 22) {
+      const reachable = reachableNow();
+      const sourcePool = reachable.filter((platform) => {
+        const gap = y - platform.y;
+        return gap > 34 && gap < 284;
+      });
+      const width = clampNumber(
+        randomBetween(76, 92) - difficulty * randomBetween(14, 25) + (profile === 0 ? 4 : 0),
+        54,
+        96,
+      );
+      let x = randomScatterX();
+      let placed = false;
+
+      for (let tries = 0; tries < 34; tries += 1) {
+        const candidate: Platform = { id: -1, x, y, width, kind: "flower", used: false, breaking: 0 };
+        const hasEntrance = sourcePool.some((source) => canJumpBetween(source, candidate, difficulty));
+        const doesNotTraceLast = generatedCount < 2 || Math.abs(x - state.lastPlatformX) > 28 || tries > 14;
+        if (hasEntrance && doesNotTraceLast && !platformPlacementOverlaps(field, x, y, width)) {
+          placed = true;
+          break;
+        }
+        x = randomScatterX();
+      }
+
+      if (!placed && sourcePool.length > 0) {
+        const source = sourcePool[Math.floor(Math.random() * sourcePool.length)];
+        const reach = horizontalReachForGap(y - source.y, difficulty) * .76;
+        for (let tries = 0; tries < 18; tries += 1) {
+          x = clampNumber(source.x + randomBetween(-reach, reach), width / 2 + 7, WIDTH - width / 2 - 7);
+          if (!platformPlacementOverlaps(field, x, y, width)) {
+            placed = true;
+            break;
+          }
+        }
+      }
+
+      if (!placed) {
+        const highest = [...reachable].sort((a, b) => b.y - a.y)[0];
+        if (!highest) break;
+        y = highest.y + Math.min(190, randomBetween(92, 138));
+        continue;
+      }
+
+      let kind: PlatformKind = "flower";
+      const movingRate = profile === 4 ? .34 + difficulty * .15 : .025 + difficulty * .11;
+      if (meters > 520 && Math.random() < movingRate) kind = "moving";
+      else if (meters > 2600 && Math.random() < .015 + difficulty * .1) kind = "fading";
+      const main = pushPlatform(x, y, width, kind);
+      state.lastPlatformX = main.x;
+      generatedCount += 1;
+
+      // Alternate landing points are offset in both axes, never visually stacked.
+      const branchChance = profile === 0
+        ? .48 - difficulty * .2
+        : profile === 2 ? .08
+          : .3 - difficulty * .15;
+      if (Math.random() < branchChance) {
+        const branchY = y + randomBetween(38, 74);
+        const branchWidth = clampNumber(width + randomBetween(-10, 6), 52, 92);
+        const branchSources = reachableNow().filter((platform) => {
+          const gap = branchY - platform.y;
+          return gap > 34 && gap < 284;
+        });
+        for (let tries = 0; tries < 24; tries += 1) {
+          const branchX = randomScatterX();
+          const candidate: Platform = { id: -1, x: branchX, y: branchY, width: branchWidth, kind: "flower", used: false, breaking: 0 };
+          const separate = Math.abs(branchX - x) > 116;
+          if (
+            separate
+            && branchSources.some((source) => canJumpBetween(source, candidate, difficulty))
+            && !platformPlacementOverlaps(field, branchX, branchY, branchWidth)
+          ) {
+            const branchMoving = meters > 650 && profile === 4 && Math.random() < .38;
+            pushPlatform(branchX, branchY, branchWidth, branchMoving ? "moving" : "flower");
+            generatedCount += 1;
+            break;
+          }
+        }
+      }
+
+      // Broken boards are tempting extra targets from the beginning, as in the
+      // reference, but never replace the only reachable solid board.
+      if (Math.random() < .2 + difficulty * .17) {
+        const brokenWidth = clampNumber(randomBetween(56, 72) - difficulty * 7, 48, 72);
+        for (let tries = 0; tries < 18; tries += 1) {
+          const brokenX = randomBetween(34, WIDTH - 34);
+          const brokenY = y + randomBetween(-44, 66);
+          if (!platformPlacementOverlaps(field, brokenX, brokenY, brokenWidth)) {
+            pushPlatform(brokenX, brokenY, brokenWidth, "broken");
+            generatedCount += 1;
+            break;
+          }
+        }
+      }
+
+      let nextGap = randomBetween(baseGapMin, baseGapMax);
+      if (profile === 0 && Math.random() < .32) nextGap *= randomBetween(.65, .82);
+      if (profile === 2 && Math.random() < .42) nextGap *= randomBetween(1.08, 1.22);
+      y += clampNumber(nextGap, 42, 202);
+    }
+
+    let reachable = reachableNow();
+    const highestReachable = Math.max(...reachable.map((platform) => platform.y));
+    if (highestReachable < segmentTop - 150) {
+      const topY = Math.min(segmentTop - 64, highestReachable + randomBetween(92, 154));
+      const sources = reachable.filter((platform) => topY - platform.y > 34 && topY - platform.y < 284);
+      const source = sources[Math.floor(Math.random() * sources.length)];
+      if (source) {
+        const topWidth = clampNumber(randomBetween(66, 84) - difficulty * 12, 54, 84);
+        const reach = horizontalReachForGap(topY - source.y, difficulty) * .76;
+        const topX = clampNumber(source.x + randomBetween(-reach, reach), topWidth / 2 + 7, WIDTH - topWidth / 2 - 7);
+        pushPlatform(topX, topY, topWidth, "flower");
+      }
+    }
+
+    reachable = reachableNow();
+    const safeField = field.filter((platform) => (
+      isLandingPlatform(platform)
+      && reachable.some((reachablePlatform) => reachablePlatform.id === platform.id)
+    ));
+
+    // Springs are visible from the opening screen and recur more often than
+    // powered flight, matching the reference video's readable risk/reward mix.
+    const springIntervals = [10, 12, 13, 14, 14, 15];
+    if (
+      state.springTargetY <= segmentBottom
+      && state.routeStep - state.lastSpringStep >= springIntervals[stage]
+      && segmentTop < state.nextRocketY
+      && segmentTop < state.nextCopterY
+    ) {
+      const springCandidates = safeField.filter((platform) => (
+        platform.kind === "flower"
+        && platform.y > segmentBottom + 170
+        && platform.y < segmentTop - 270
+      ));
+      const spring = springCandidates[Math.floor(Math.random() * springCandidates.length)];
+      if (spring) {
+        spring.kind = "spring";
+        spring.width = Math.max(68, spring.width);
+        state.springTargetY = spring.y + randomBetween(610, 660);
+        state.springTargetX = clampNumber(spring.x + randomBetween(-92, 92), 54, WIDTH - 54);
+        state.lastSpringStep = state.routeStep;
+      }
+    }
+
+    const placeBoost = (kind: "rocket" | "bambooCopter", threshold: number) => {
+      if (threshold > segmentTop) return false;
+      const candidates = safeField.filter((platform) => (
+        platform.kind === "flower"
+        && platform.y >= threshold - 170
+        && platform.y <= threshold + 190
+      ));
+      const platform = candidates[Math.floor(Math.random() * candidates.length)];
+      if (!platform) return false;
+      state.airItems.push({
+        id: state.nextId++,
+        x: platform.x,
+        y: platform.y + (kind === "rocket" ? 54 : 45),
+        kind,
+        used: false,
+      });
+      if (kind === "rocket") {
+        state.rocketRecoveryY = platform.y + ROCKET_RECOVERY_DISTANCE;
+        state.rocketRecoveryX = clampNumber(platform.x + randomBetween(-90, 90), 54, WIDTH - 54);
+        state.nextRocketY += ROCKET_INTERVAL_WORLD;
+      } else {
+        state.copterRecoveryY = platform.y + COPTER_RECOVERY_DISTANCE;
+        state.copterRecoveryX = clampNumber(platform.x + randomBetween(-80, 80), 54, WIDTH - 54);
+        state.nextCopterY += COPTER_INTERVAL_WORLD;
+      }
+      return true;
+    };
+    const rocketPlaced = placeBoost("rocket", state.nextRocketY);
+    if (!rocketPlaced) placeBoost("bambooCopter", state.nextCopterY);
+
+    if (meters > 55 && safeField.length > 0 && Math.random() < .24) {
+      const jarPlatform = safeField[Math.floor(Math.random() * safeField.length)];
+      if (!state.airItems.some((item) => Math.abs(item.y - jarPlatform.y) < 90)) {
+        state.airItems.push({
+          id: state.nextId++,
+          x: jarPlatform.x,
+          y: jarPlatform.y + 45,
+          kind: "honeyJar",
+          used: false,
+          value: profile === 2 ? 100 : 50,
+        });
+      }
+    }
+
+    // The video first introduces a single airborne monster after the player
+    // has learned the jump rhythm. Sparse pockets never carry a monster.
+    const enoughRoomSinceHazard = state.routeStep - state.lastHazardStep > Math.round(13 - difficulty * 3);
+    const hazardChance = meters < 620 || profile === 2
+      ? 0
+      : .16 + difficulty * .3;
+    if (enoughRoomSinceHazard && Math.random() < hazardChance && safeField.length >= 4) {
+      const hazardRoll = Math.random();
+      let kind: AirKind = "bear";
+      if (meters > 3100 && hazardRoll < .16) kind = "blackHole";
+      else if (meters > 2100 && hazardRoll < .42) kind = "bat";
+      else if (meters > 1250 && hazardRoll < .68) kind = "hornet";
+      else if (meters > 1700 && hazardRoll < .83) kind = "web";
+      const ordered = [...safeField].sort((a, b) => a.y - b.y);
+      const lowerIndex = Math.floor(randomBetween(1, Math.max(2, ordered.length - 2)));
+      const lower = ordered[Math.min(lowerIndex, ordered.length - 2)];
+      const upper = ordered.slice(lowerIndex + 1).find((platform) => (
+        platform.y > lower.y + 64 && platform.y < lower.y + 250
+      ));
+      if (lower && upper) {
+        const item: AirItem = {
+          id: state.nextId++,
+          x: clampNumber((lower.x + upper.x) / 2 + randomBetween(-56, 56), 48, WIDTH - 48),
+          y: (lower.y + upper.y) / 2 + randomBetween(-18, 18),
+          kind,
+          used: false,
+        };
+        if (kind === "bear" || kind === "hornet" || kind === "bat") {
+          item.baseX = item.x;
+          item.range = kind === "bear" ? 34 + difficulty * 28 : 48 + difficulty * 38;
+          item.speed = kind === "bear" ? .82 + difficulty * .38 : 1.08 + difficulty * .62;
+          item.phase = Math.random() * Math.PI * 2;
+        }
+        state.airItems.push(item);
+        state.lastHazardStep = state.routeStep;
+      }
+    }
+
+    state.platforms.push(...field);
+    const topReachable = [...reachableNow()].sort((a, b) => b.y - a.y)[0];
+    if (topReachable) state.lastPlatformX = topReachable.x;
+    state.generatedTo = segmentTop;
+    state.routeStep += field.length;
+    state.sceneRemaining = 0;
+    state.sceneProgress = 0;
+  }
+}
+
 function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, time: number) {
   const shake = p.breaking > 0 ? Math.sin(time * 0.09) * 5 : 0;
   ctx.save();
@@ -1027,75 +1380,80 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
   const broken = p.kind === "broken";
   const moving = p.kind === "moving";
   const fading = p.kind === "fading";
-  const outline = "#4a3b30";
-  const petal = broken ? "#aa9386" : moving ? "#77c9ed" : fading ? "#f4d8e4" : "#ff9eb5";
-  const petalLight = broken ? "#d8c3b8" : moving ? "#c8f0ff" : fading ? "#fff7fb" : "#ffd0dc";
-  const center = broken ? "#765e52" : moving ? "#ffd765" : fading ? "#e9b6ca" : "#f6ad25";
+  const outline = "#403b38";
+  const board = broken ? "#9a765c" : moving ? "#39aee1" : fading ? "#fffdf7" : "#ff8fb1";
+  const boardLight = broken ? "#cfad91" : moving ? "#9fe5ff" : fading ? "#ffffff" : "#ffd0df";
+  const center = broken ? "#6c5040" : moving ? "#ffd34d" : fading ? "#efcad8" : "#f5ae29";
 
-  ctx.fillStyle = "rgba(79,61,48,.13)";
+  ctx.fillStyle = "rgba(62,48,38,.16)";
   ctx.beginPath();
-  ctx.ellipse(p.x, sy + 7, p.width * .49, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x, sy + 5.5, p.width * .48, 3, 0, 0, Math.PI * 2);
   ctx.fill();
-  if (!broken) {
-    ctx.fillStyle = moving ? "#5aa6d4" : fading ? "#bda8ba" : "#68b96b";
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2;
-    roundedRect(ctx, p.x - p.width * .43, sy, p.width * .86, 9, 5);
+
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 2.2;
+  if (broken) {
+    const half = p.width * .42;
+    ctx.fillStyle = board;
+    roundedRect(ctx, p.x - p.width * .49, sy - 5, half, 11, 5);
     ctx.fill();
     ctx.stroke();
-  }
-  ctx.fillStyle = petal;
-  ctx.strokeStyle = outline;
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 3; i += 1) {
-    const px = p.x - p.width * .27 + i * p.width * .27;
-    ctx.beginPath();
-    ctx.ellipse(px, sy - (i === 1 ? 1.5 : 0), p.width * .245, i === 1 ? 8 : 7, 0, 0, Math.PI * 2);
+    roundedRect(ctx, p.x + p.width * .07, sy - 5, half, 11, 5);
     ctx.fill();
     ctx.stroke();
-  }
-  ctx.fillStyle = petalLight;
-  ctx.globalAlpha = .72;
-  ctx.beginPath();
-  ctx.ellipse(p.x - p.width * .2, sy - 3, p.width * .16, 2, -.08, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = center;
-  ctx.strokeStyle = outline;
-  ctx.beginPath();
-  ctx.ellipse(p.x, sy, p.width * .23, 5.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  if (p.kind === "broken") {
-    ctx.strokeStyle = "#5b473c";
-    ctx.lineWidth = 2.5;
+    ctx.fillStyle = boardLight;
+    roundedRect(ctx, p.x - p.width * .42, sy - 2.5, p.width * .2, 2.5, 2);
+    ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(p.x - 6, sy - 6);
-    ctx.lineTo(p.x + 1, sy - 1);
-    ctx.lineTo(p.x - 3, sy + 6);
-    ctx.moveTo(p.x + 3, sy - 3);
-    ctx.lineTo(p.x + 9, sy + 4);
+    ctx.moveTo(p.x - 4, sy - 6);
+    ctx.lineTo(p.x + 2, sy - 1);
+    ctx.lineTo(p.x - 2, sy + 6);
+    ctx.moveTo(p.x + 4, sy - 5);
+    ctx.lineTo(p.x - 1, sy);
+    ctx.lineTo(p.x + 4, sy + 5);
     ctx.stroke();
+  } else {
+    ctx.fillStyle = board;
+    roundedRect(ctx, p.x - p.width / 2, sy - 5.5, p.width, 12, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = boardLight;
+    roundedRect(ctx, p.x - p.width * .37, sy - 3.3, p.width * .37, 2.7, 2);
+    ctx.fill();
+    ctx.fillStyle = center;
+    ctx.beginPath();
+    ctx.ellipse(p.x, sy, Math.min(14, p.width * .18), 4.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = moving ? "#177ead" : fading ? "#d8a9ba" : "#d76289";
+    ctx.lineWidth = 1.2;
+    for (const offset of [-.3, .3]) {
+      ctx.beginPath();
+      ctx.moveTo(p.x + p.width * offset, sy - 3.4);
+      ctx.quadraticCurveTo(p.x + p.width * offset * .82, sy, p.x + p.width * offset, sy + 3.8);
+      ctx.stroke();
+    }
   }
   if (p.kind === "spring") {
-    const compress = Math.sin(time * .012 + p.id) * 1.5;
-    ctx.fillStyle = "#ffd34d";
+    const compress = Math.sin(time * .012 + p.id) * 1.3;
+    ctx.fillStyle = "#f7c833";
     ctx.strokeStyle = outline;
     ctx.lineWidth = 2;
-    roundedRect(ctx, p.x - 16, sy - 13, 32, 7, 4);
+    roundedRect(ctx, p.x - 15, sy - 13, 30, 6, 3);
     ctx.fill();
     ctx.stroke();
-    ctx.strokeStyle = "#eef5fb";
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#565d65";
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    for (let i = 0; i <= 6; i += 1) {
-      const px = p.x - 10 + i * 3.4;
-      const py = sy - 10 - (i % 2 ? 12 + compress : 0);
+    for (let i = 0; i <= 7; i += 1) {
+      const px = p.x - 10.5 + i * 3;
+      const py = sy - 10 - (i % 2 ? 11 + compress : 0);
       if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.stroke();
-    ctx.fillStyle = "#58a7d8";
-    roundedRect(ctx, p.x - 13, sy - 27 - compress, 26, 6, 3);
+    ctx.fillStyle = "#f7c833";
+    ctx.strokeStyle = outline;
+    roundedRect(ctx, p.x - 13, sy - 25 - compress, 26, 6, 3);
     ctx.fill();
     ctx.stroke();
   }
@@ -1131,31 +1489,23 @@ function drawBear(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.restore();
 }
 
-function drawBearSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, time: number) {
+function drawDoodleMonsterSprite(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  x: number,
+  y: number,
+  time: number,
+  size = 78,
+) {
   ctx.save();
-  ctx.translate(x, y + Math.sin(time * .005) * 2);
-  ctx.rotate(Math.sin(time * .0035) * .025);
-  const pulse = 1 + Math.sin(time * .01) * .08;
-  ctx.strokeStyle = "rgba(221,66,53,.82)";
-  ctx.lineWidth = 4;
-  ctx.setLineDash([7, 6]);
-  ctx.beginPath();
-  ctx.arc(0, 0, 41 * pulse, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#df4939";
-  ctx.beginPath();
-  ctx.arc(27, -31, 12, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = "900 16px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("!", 27, -25);
-  const height = 60;
-  const width = height * (image.naturalWidth / image.naturalHeight);
-  ctx.shadowColor = "rgba(69,42,25,.24)";
-  ctx.shadowBlur = 6;
-  ctx.shadowOffsetY = 4;
+  ctx.translate(x, y + Math.sin(time * .006 + x * .02) * 4);
+  ctx.rotate(Math.sin(time * .004 + x) * .035);
+  ctx.shadowColor = "rgba(57,46,40,.18)";
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 3;
+  const scale = size / Math.max(image.naturalWidth, image.naturalHeight);
+  const width = image.naturalWidth * scale;
+  const height = image.naturalHeight * scale;
   ctx.drawImage(image, -width / 2, -height / 2, width, height);
   ctx.restore();
 }
@@ -1631,7 +1981,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   const phaseRef = useRef(phase);
   const frameRef = useRef(0);
   const beeImageRef = useRef<HTMLImageElement | null>(null);
-  const bearImageRef = useRef<HTMLImageElement | null>(null);
+  const redMonsterImageRef = useRef<HTMLImageElement | null>(null);
+  const purpleMonsterImageRef = useRef<HTMLImageElement | null>(null);
+  const blueMonsterImageRef = useRef<HTMLImageElement | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
   const orientationRef = useRef({ tilt: 0, baseline: 0, calibrated: false, reported: false });
   const pointerRef = useRef({ active: false, x: WIDTH / 2, startX: WIDTH / 2, startTime: 0, moved: false });
@@ -1650,17 +2002,25 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   }, [resetToken]);
   useEffect(() => {
     const beeImage = new Image();
-    const bearImage = new Image();
+    const redMonsterImage = new Image();
+    const purpleMonsterImage = new Image();
+    const blueMonsterImage = new Image();
     const backgroundImage = new Image();
     beeImage.src = "/bee-character-flying-final.png";
-    bearImage.src = "/honey-thief-bear.png";
+    redMonsterImage.src = "/monster-red-fuzz.png";
+    purpleMonsterImage.src = "/monster-purple-jelly.png";
+    blueMonsterImage.src = "/monster-blue-cyclops.png";
     backgroundImage.src = "/game-background-long.png";
     beeImage.onload = () => { beeImageRef.current = beeImage; };
-    bearImage.onload = () => { bearImageRef.current = bearImage; };
+    redMonsterImage.onload = () => { redMonsterImageRef.current = redMonsterImage; };
+    purpleMonsterImage.onload = () => { purpleMonsterImageRef.current = purpleMonsterImage; };
+    blueMonsterImage.onload = () => { blueMonsterImageRef.current = blueMonsterImage; };
     backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
     return () => {
       beeImageRef.current = null;
-      bearImageRef.current = null;
+      redMonsterImageRef.current = null;
+      purpleMonsterImageRef.current = null;
+      blueMonsterImageRef.current = null;
       backgroundImageRef.current = null;
     };
   }, []);
@@ -1760,14 +2120,22 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         const sy = screenY(item.y, state.cameraY);
         if (sy < -70 || sy > HEIGHT + 70) continue;
         if (item.kind === "bear") {
-          const bearImage = bearImageRef.current;
-          if (bearImage) drawBearSprite(ctx, bearImage, item.x, sy, time);
+          const redMonsterImage = redMonsterImageRef.current;
+          if (redMonsterImage) drawDoodleMonsterSprite(ctx, redMonsterImage, item.x, sy, time, 60);
           else drawBear(ctx, item.x, sy);
         }
         else if (item.kind === "web") drawWeb(ctx, item.x, sy, time);
         else if (item.kind === "blackHole") drawBlackHole(ctx, item.x, sy, time);
-        else if (item.kind === "hornet") drawHornet(ctx, item.x, sy, time);
-        else if (item.kind === "bat") drawBat(ctx, item.x, sy, time);
+        else if (item.kind === "hornet") {
+          const purpleMonsterImage = purpleMonsterImageRef.current;
+          if (purpleMonsterImage) drawDoodleMonsterSprite(ctx, purpleMonsterImage, item.x, sy, time, 58);
+          else drawHornet(ctx, item.x, sy, time);
+        }
+        else if (item.kind === "bat") {
+          const blueMonsterImage = blueMonsterImageRef.current;
+          if (blueMonsterImage) drawDoodleMonsterSprite(ctx, blueMonsterImage, item.x, sy, time, 60);
+          else drawBat(ctx, item.x, sy, time);
+        }
         else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time);
         else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time);
         else drawHoneyJar(ctx, item.x, sy, time, item.value);
@@ -1817,13 +2185,13 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         cloud: "漂浮云阶：跟随云朵移动再起跳",
         fading: "透明花：只能踩一次",
         honeyJar: "蜂蜜罐：采蜜值 +50",
-        bear: "偷蜜熊：踩头加分，侧撞结束",
+        bear: "红绒怪：踩头可击退，侧面碰到就会失败",
         web: "蜘蛛网：碰到就会被吸住",
         blackHole: "黑洞：会吸引小蜜蜂，碰到就会失败",
-        hornet: "黑蜂怪：可以踩头或用花粉弹击退",
-        bat: "蝙蝠怪：横向巡逻，可以踩头或射击",
-        rocket: "花蜜火箭：超长飞跃约二十四层",
-        bambooCopter: "竹蜻蜓：持续旋转升空约十二层",
+        hornet: "紫果冻怪：横向漂浮，可以踩头或用花粉弹击退",
+        bat: "蓝眼怪：会巡逻挡路，可以踩头或射击",
+        rocket: "花蜜火箭：超长飞跃约十五层",
+        bambooCopter: "竹蜻蜓：持续旋转升空约九层",
       };
       const teach = (kind: TutorialKey) => {
         if (state.tutorialTimer > 0 || state.taught[kind] || !tutorialText[kind]) return;
@@ -1850,7 +2218,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         if (!item.used && sy > 150 && sy < HEIGHT - 120) teach(item.kind);
       }
       const bearDangerActive = state.airItems.some((item) => {
-        if (item.used || item.kind !== "bear") return false;
+        if (item.used || (item.kind !== "bear" && item.kind !== "hornet" && item.kind !== "bat")) return false;
         const sy = screenY(item.y, state.cameraY);
         const notSafelyPassed = item.y > state.beeY - 90;
         return sy > -215 && sy < HEIGHT + 70 && notSafelyPassed;
@@ -1943,7 +2311,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           item.used = true;
           shot.life = 0;
           state.bonusHoney += 100;
-          state.message = `花粉弹击退${item.kind === "bear" ? "偷蜜熊" : item.kind === "hornet" ? "黑蜂怪" : "蝙蝠怪"} +100`;
+          state.message = `花粉弹击退${item.kind === "bear" ? "红绒怪" : item.kind === "hornet" ? "紫果冻怪" : "蓝眼怪"} +100`;
           state.messageTimer = 1;
           playGameSound("hit");
           burst(state, item.x, screenY(item.y, state.cameraY), "#ffd12f", 20);
@@ -1991,7 +2359,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           playGameSound("copter");
           burst(state, item.x, sy, "#8dd477", 18);
         } else if (item.kind === "bear" || item.kind === "hornet" || item.kind === "bat") {
-          const monsterName = item.kind === "bear" ? "偷蜜熊" : item.kind === "hornet" ? "黑蜂怪" : "蝙蝠怪";
+          const monsterName = item.kind === "bear" ? "红绒怪" : item.kind === "hornet" ? "紫果冻怪" : "蓝眼怪";
           const stomped = state.vy < 0 && state.beeY > item.y + 18;
           if (stomped) {
             item.used = true;
@@ -2189,10 +2557,10 @@ export default function Home() {
         <div className="brand-mark"><span>蜜</span></div>
         <p className="eyebrow">ENDLESS HONEY JUMP</p>
         <h1>小蜜蜂<br /><em>无限采蜜</em></h1>
-        <p className="brand-copy">自动弹跳、左右操控。花朵会越来越窄，避开裂花、偷蜜熊与蜘蛛网，冲击更高采蜜值。</p>
+        <p className="brand-copy">自动飞跃、左右操控。花台会逐渐变少、变窄，避开裂花和涂鸦怪，冲击更高采蜜值。</p>
         <div className="score-rule"><span>🏆</span><div><strong>采蜜值就是唯一成绩</strong><small>向上攀升和蜂蜜罐都会加分</small></div></div>
         <div className="control-tip"><div className="phone-tilt" aria-hidden="true"><span>↔</span></div><div><strong>只控制左右</strong><small>跳跃与上升完全自动</small></div></div>
-        <div className="legend"><span><i className="dot flower-dot" />粉花安全</span><span><i className="dot bear-dot" />红圈危险</span></div>
+        <div className="legend"><span><i className="dot flower-dot" />粉花安全</span><span><i className="dot bear-dot" />涂鸦怪危险</span></div>
       </section>
 
       <section className="game-phone">

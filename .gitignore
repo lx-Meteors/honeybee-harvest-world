@@ -47,3 +47,5 @@ next-env.d.ts
 /.devserver-*.ps1
 /.lan-proxy.*
 /.quick-tunnel.ps1
+/public/__analysis-video.mp4
+/public/__video-analysis.html
