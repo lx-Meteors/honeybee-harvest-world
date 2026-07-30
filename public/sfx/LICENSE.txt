@@ -1,0 +1,18 @@
+Sound effects in this folder are selected and renamed from these Kenney packs:
+
+- Interface Sounds
+- Impact Sounds
+- RPG Audio
+- Sci-fi Sounds
+
+License: Creative Commons Zero (CC0 1.0)
+Source: https://kenney.nl/assets
+License details: https://creativecommons.org/publicdomain/zero/1.0/
+
+Attribution is not required. This file is retained to document provenance.
+
+Background music:
+
+- "Swinging Sweet" by hernandack
+- Source: https://opengameart.org/content/short-loops-background-music-pack
+- License: Creative Commons Zero (CC0 1.0)

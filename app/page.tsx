@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Phase = "menu" | "playing" | "paused" | "failed";
 type ControlMode = "motion" | "touch";
-type PlatformKind = "flower" | "gold" | "broken" | "spring";
-type AirKind = "bear" | "web" | "rocket";
+type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading";
+type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar";
+type TutorialKey = PlatformKind | AirKind;
+type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
 
 type Platform = {
   id: number;
@@ -15,31 +17,59 @@ type Platform = {
   kind: PlatformKind;
   used: boolean;
   breaking: number;
+  baseX?: number;
+  range?: number;
+  speed?: number;
+  phase?: number;
+  route?: "safe" | "risk";
 };
 
-type AirItem = { id: number; x: number; y: number; kind: AirKind; used: boolean };
+type AirItem = { id: number; x: number; y: number; kind: AirKind; used: boolean; value?: number; baseX?: number; range?: number; speed?: number; phase?: number; audioPlayed?: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
+type PollenShot = { x: number; y: number; vy: number; life: number };
 
 type GameState = {
   beeX: number;
   beeY: number;
   vx: number;
   vy: number;
+  facing: -1 | 1;
   cameraY: number;
   honey: number;
+  bonusHoney: number;
   highest: number;
-  heightRewarded: number;
   platforms: Platform[];
   airItems: AirItem[];
   particles: Particle[];
+  shots: PollenShot[];
   generatedTo: number;
   lastPlatformX: number;
+  routeDirection: number;
+  routeStep: number;
+  routePattern: number;
+  sceneRemaining: number;
+  sceneProgress: number;
+  lastSpringStep: number;
+  springTargetY: number;
+  springTargetX: number;
+  lastHazardStep: number;
+  lastJarStep: number;
+  ammo: number;
+  ammoProgress: number;
+  nextRocketY: number;
+  rocketRecoveryY: number;
+  rocketRecoveryX: number;
+  nextCopterY: number;
+  copterRecoveryY: number;
+  copterRecoveryX: number;
   nextId: number;
   invincible: number;
-  webTimer: number;
   rocketTimer: number;
+  copterTimer: number;
   message: string;
   messageTimer: number;
+  tutorialTimer: number;
+  taught: Record<TutorialKey, boolean>;
   lastTime: number;
   ended: boolean;
 };
@@ -47,10 +77,201 @@ type GameState = {
 const WIDTH = 540;
 const HEIGHT = 720;
 const FLOOR_Y = HEIGHT - 74;
-const GRAVITY = 1150;
-const JUMP_SPEED = 505;
-const SPRING_SPEED = 745;
-const ROCKET_SPEED = 820;
+const GRAVITY = 950;
+const JUMP_SPEED = 735;
+const SPRING_SPEED = 1080;
+const ROCKET_SPEED = 830;
+const COPTER_SPEED = 790;
+const HEIGHT_SCALE = 16;
+const VIEW_SCALE = .72;
+const ROCKET_INTERVAL_METERS = 450;
+const ROCKET_INTERVAL_WORLD = ROCKET_INTERVAL_METERS * HEIGHT_SCALE;
+const ROCKET_FLIGHT_TIME = 2.05;
+const ROCKET_RECOVERY_DISTANCE = 1960;
+const COPTER_INTERVAL_METERS = 320;
+const COPTER_INTERVAL_WORLD = COPTER_INTERVAL_METERS * HEIGHT_SCALE;
+const COPTER_FLIGHT_TIME = 1.05;
+const COPTER_RECOVERY_DISTANCE = 1080;
+const SFX_VOLUME = .66;
+
+let sharedAudioContext: AudioContext | null = null;
+let activeBearDangerLoop: HTMLAudioElement | null = null;
+let backgroundMusic: HTMLAudioElement | null = null;
+const audioPools = new Map<SoundKind, HTMLAudioElement[]>();
+
+const SOUND_FILES: Partial<Record<SoundKind, string>> = {
+  start: "/sfx/start.ogg",
+  bounce: "/sfx/bounce.ogg",
+  spring: "/sfx/spring.ogg",
+  break: "/sfx/break.ogg",
+  honey: "/sfx/honey.ogg",
+  rocket: "/sfx/rocket.ogg",
+  copter: "/sfx/copter.ogg",
+  shoot: "/sfx/shoot.ogg",
+  hit: "/sfx/hit.ogg",
+  fail: "/sfx/fail.ogg",
+  empty: "/sfx/empty.ogg",
+  bearWarning: "/sfx/monster-warning.ogg",
+  webWind: "/sfx/web-wind.ogg",
+  blackHole: "/sfx/black-hole.ogg",
+};
+
+function playAudioFile(kind: SoundKind) {
+  if (typeof window === "undefined") return false;
+  const source = SOUND_FILES[kind];
+  if (!source) return false;
+  let pool = audioPools.get(kind);
+  if (!pool) {
+    pool = Array.from({ length: kind === "bounce" ? 4 : 2 }, () => {
+      const audio = new Audio(source);
+      audio.preload = "auto";
+      audio.volume = SFX_VOLUME;
+      return audio;
+    });
+    audioPools.set(kind, pool);
+  }
+  const audio = pool.find((candidate) => candidate.paused || candidate.ended) ?? pool[0];
+  audio.currentTime = 0;
+  audio.volume = SFX_VOLUME;
+  void audio.play().catch(() => undefined);
+  return true;
+}
+
+function getGameAudioContext() {
+  if (typeof window === "undefined") return null;
+  const AudioContextClass = window.AudioContext
+    ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!sharedAudioContext || sharedAudioContext.state === "closed") sharedAudioContext = new AudioContextClass();
+  if (sharedAudioContext.state === "suspended") void sharedAudioContext.resume();
+  return sharedAudioContext;
+}
+
+function playGameSound(kind: SoundKind) {
+  if (playAudioFile(kind)) return;
+  const audio = getGameAudioContext();
+  if (!audio) return;
+  const tone = (from: number, to: number, duration: number, type: OscillatorType, volume: number, delay = 0) => {
+    const start = audio.currentTime + delay;
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(from, start);
+    oscillator.frequency.exponentialRampToValueAtTime(to, start + duration);
+    gain.gain.setValueAtTime(.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + .012);
+    gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(audio.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + .02);
+  };
+  const noise = (duration: number, filterType: BiquadFilterType, from: number, to: number, volume: number, delay = 0, attack = .04) => {
+    const start = audio.currentTime + delay;
+    const frameCount = Math.ceil(audio.sampleRate * duration);
+    const buffer = audio.createBuffer(1, frameCount, audio.sampleRate);
+    const samples = buffer.getChannelData(0);
+    let smoothed = 0;
+    for (let i = 0; i < frameCount; i += 1) {
+      smoothed = smoothed * .72 + (Math.random() * 2 - 1) * .28;
+      samples[i] = smoothed;
+    }
+    const source = audio.createBufferSource();
+    const filter = audio.createBiquadFilter();
+    const gain = audio.createGain();
+    source.buffer = buffer;
+    filter.type = filterType;
+    filter.Q.value = filterType === "bandpass" ? 1.2 : .7;
+    filter.frequency.setValueAtTime(from, start);
+    filter.frequency.exponentialRampToValueAtTime(to, start + duration);
+    gain.gain.setValueAtTime(.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + attack);
+    gain.gain.setValueAtTime(volume * .78, start + duration * .58);
+    gain.gain.exponentialRampToValueAtTime(.0001, start + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(audio.destination);
+    source.start(start);
+    source.stop(start + duration + .02);
+  };
+
+  if (kind === "start") {
+    tone(392, 523, .16, "sine", .032);
+    tone(523, 784, .2, "sine", .028, .1);
+  } else if (kind === "bounce") {
+    tone(175, 315, .09, "sine", .022);
+    tone(350, 240, .055, "triangle", .009, .04);
+  } else if (kind === "spring") {
+    tone(165, 590, .25, "triangle", .045);
+    tone(290, 870, .18, "sine", .03, .075);
+    tone(520, 740, .12, "sine", .018, .18);
+  } else if (kind === "break") {
+    noise(.19, "bandpass", 1500, 240, .05, 0, .008);
+    tone(145, 52, .18, "triangle", .032);
+  }
+  else if (kind === "honey") {
+    tone(523, 784, .17, "sine", .038);
+    tone(659, 1046, .2, "sine", .029, .08);
+    tone(784, 1318, .17, "sine", .019, .16);
+  } else if (kind === "rocket") {
+    noise(1.05, "lowpass", 420, 1250, .052, 0, .08);
+    tone(72, 185, .7, "sawtooth", .024);
+    tone(118, 270, .58, "triangle", .018, .08);
+  } else if (kind === "shoot") {
+    noise(.09, "highpass", 2200, 680, .025, 0, .005);
+    tone(690, 280, .1, "triangle", .028);
+  } else if (kind === "hit") {
+    noise(.14, "bandpass", 720, 170, .04, 0, .006);
+    tone(210, 480, .14, "triangle", .034);
+  } else if (kind === "empty") tone(130, 104, .09, "sine", .014);
+  else if (kind === "bearWarning") {
+    noise(.95, "bandpass", 320, 125, .075, 0, .09);
+    tone(92, 54, .82, "sawtooth", .05);
+    tone(76, 47, .58, "triangle", .034, .24);
+  } else if (kind === "webWind") {
+    noise(1.35, "bandpass", 520, 1900, .07, 0, .16);
+    noise(.95, "highpass", 1100, 3200, .025, .2, .12);
+  } else {
+    noise(.38, "lowpass", 520, 95, .05, 0, .02);
+    tone(190, 48, .38, "sawtooth", .045);
+    tone(112, 42, .34, "triangle", .024, .08);
+  }
+}
+
+function setBearDangerSound(active: boolean) {
+  if (!active && !activeBearDangerLoop) return;
+  if (active && !activeBearDangerLoop && typeof window !== "undefined") {
+    const loop = new Audio("/sfx/monster-warning.ogg");
+    loop.loop = true;
+    loop.preload = "auto";
+    loop.volume = SFX_VOLUME * .68;
+    void loop.play().catch(() => undefined);
+    activeBearDangerLoop = loop;
+  } else if (!active && activeBearDangerLoop) {
+    activeBearDangerLoop.pause();
+    activeBearDangerLoop.currentTime = 0;
+    activeBearDangerLoop = null;
+  }
+}
+
+function setBackgroundMusic(active: boolean) {
+  if (typeof window === "undefined") return;
+  if (active) {
+    if (!backgroundMusic) {
+      backgroundMusic = new Audio("/sfx/background-music.ogg");
+      backgroundMusic.loop = true;
+      backgroundMusic.preload = "auto";
+      backgroundMusic.volume = .14;
+    }
+    void backgroundMusic.play().catch(() => undefined);
+  } else if (backgroundMusic) {
+    backgroundMusic.pause();
+  }
+}
+
+function heightMeters(worldY: number) {
+  return Math.max(0, (worldY - 48) / HEIGHT_SCALE);
+}
 
 function firstState(): GameState {
   return {
@@ -58,21 +279,43 @@ function firstState(): GameState {
     beeY: 48,
     vx: 0,
     vy: JUMP_SPEED,
+    facing: 1,
     cameraY: 0,
     honey: 0,
+    bonusHoney: 0,
     highest: 48,
-    heightRewarded: 0,
-    platforms: [{ id: 0, x: WIDTH / 2, y: 16, width: 130, kind: "flower", used: true, breaking: 0 }],
+    platforms: [{ id: 0, x: WIDTH / 2, y: 16, width: 82, kind: "flower", used: true, breaking: 0 }],
     airItems: [],
     particles: [],
+    shots: [],
     generatedTo: 16,
     lastPlatformX: WIDTH / 2,
+    routeDirection: -1,
+    routeStep: 0,
+    routePattern: -1,
+    sceneRemaining: 0,
+    sceneProgress: 0,
+    lastSpringStep: -20,
+    springTargetY: -1,
+    springTargetX: WIDTH / 2,
+    lastHazardStep: -20,
+    lastJarStep: -20,
+    ammo: 1,
+    ammoProgress: 0,
+    nextRocketY: 48 + ROCKET_INTERVAL_WORLD,
+    rocketRecoveryY: 0,
+    rocketRecoveryX: WIDTH / 2,
+    nextCopterY: 48 + COPTER_INTERVAL_WORLD * .7,
+    copterRecoveryY: 0,
+    copterRecoveryX: WIDTH / 2,
     nextId: 1,
     invincible: 0,
-    webTimer: 0,
     rocketTimer: 0,
-    message: "",
-    messageTimer: 0,
+    copterTimer: 0,
+    message: "粉色花台：可以安全弹跳",
+    messageTimer: 2.6,
+    tutorialTimer: 1.4,
+    taught: { flower: true, broken: false, spring: false, moving: false, cloud: false, fading: false, bear: false, web: false, blackHole: false, hornet: false, bat: false, rocket: false, bambooCopter: false, honeyJar: false },
     lastTime: 0,
     ended: false,
   };
@@ -89,106 +332,772 @@ function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width:
   ctx.closePath();
 }
 
-function generateWorld(state: GameState, targetY: number) {
+function randomBetween(min: number, max: number) {
+  return min + Math.random() * (max - min);
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function progressionStageAtHeight(meters: number) {
+  return meters < 1200 ? 0
+    : meters < 2400 ? 1
+      : meters < 3800 ? 2
+        : meters < 5200 ? 3
+          : meters < 7000 ? 4
+            : 5;
+}
+
+function linearDifficultyAtHeight(meters: number) {
+  return clampNumber(meters / 8000, 0, 1);
+}
+
+function platformPlacementOverlaps(platforms: Platform[], x: number, y: number, width: number) {
+  return platforms.some((platform) => (
+    Math.abs(platform.y - y) < 34
+    && Math.abs(platform.x - x) < (platform.width + width) / 2 + 22
+  ));
+}
+
+function chooseRouteScene(state: GameState, stage: number) {
+  // 0 密集恢复、1 双侧散点、2 移动花、3 空旷区、4 偏角落、
+  // 5 常规散点、6 综合高难。场景交替形成局部波峰/波谷，整体难度仍随高度线性上升。
+  const scenePools = [
+    [0, 0, 0, 5, 5],
+    [0, 0, 1, 1, 5, 5, 3],
+    [0, 1, 1, 2, 2, 3, 5, 5],
+    [0, 1, 2, 2, 3, 4, 5, 6],
+    [0, 1, 2, 3, 3, 4, 5, 6, 6],
+    [0, 1, 2, 3, 3, 4, 5, 6, 6, 6],
+  ];
+  const pool = scenePools[stage];
+  let next = pool[Math.floor(Math.random() * pool.length)];
+  for (let tries = 0; tries < 5 && next === state.routePattern; tries += 1) {
+    next = pool[Math.floor(Math.random() * pool.length)];
+  }
+  state.routePattern = next;
+  state.routeDirection = Math.random() < .5 ? -1 : 1;
+  state.sceneRemaining = 1;
+  state.sceneProgress = 0;
+}
+
+function horizontalReachForGap(gap: number, difficulty: number) {
+  const discriminant = Math.max(0, JUMP_SPEED * JUMP_SPEED - 2 * GRAVITY * gap);
+  const flightTime = (JUMP_SPEED + Math.sqrt(discriminant)) / GRAVITY;
+  return clampNumber(flightTime * (220 + difficulty * 36), 138, 318);
+}
+
+function nextFieldX(state: GameState, y: number, difficulty: number, preferredRange?: [number, number]) {
+  const minX = preferredRange?.[0] ?? 40;
+  const maxX = preferredRange?.[1] ?? WIDTH - 40;
+  const supports = state.platforms.filter((platform) => {
+    const verticalGap = y - platform.y;
+    return platform.kind !== "broken" && platform.breaking < .38 && verticalGap > 34 && verticalGap < 278;
+  });
+  const isReachable = (x: number) => supports.some((support) => {
+    const verticalGap = y - support.y;
+    return Math.abs(x - support.x) <= horizontalReachForGap(verticalGap, difficulty);
+  });
+
+  for (let tries = 0; tries < 12; tries += 1) {
+    const candidate = randomBetween(minX, maxX);
+    if (isReachable(candidate) && (tries > 6 || Math.abs(candidate - state.lastPlatformX) > 34)) return candidate;
+  }
+  if (supports.length === 0) return clampNumber(state.lastPlatformX + randomBetween(-120, 120), 40, WIDTH - 40);
+  const support = supports[Math.floor(Math.random() * supports.length)];
+  const reach = horizontalReachForGap(y - support.y, difficulty) * .9;
+  return clampNumber(support.x + randomBetween(-reach, reach), 40, WIDTH - 40);
+}
+
+// Kept temporarily as a reference while the field generator is play-tested.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function generateWorldLegacy(state: GameState, targetY: number) {
   while (state.generatedTo < targetY) {
-    const difficulty = Math.min(1, state.generatedTo / 9000);
-    const gap = 54 + Math.random() * (24 + difficulty * 13);
+    const meters = heightMeters(state.generatedTo);
+    const scoreAtHeight = meters + state.bonusHoney;
+    const stage = scoreAtHeight < 300 ? 0 : scoreAtHeight < 600 ? 1 : scoreAtHeight < 1200 ? 2 : scoreAtHeight < 3000 ? 3 : scoreAtHeight < 4500 ? 4 : 5;
+    const difficulty = [0, .18, .38, .62, .82, 1][stage];
+    const step = state.routeStep;
+    if (state.sceneRemaining <= 0) chooseRouteScene(state, stage);
+    const scene = state.routePattern;
+    const sceneStep = state.sceneProgress;
+    const sceneGapRanges: Array<[number, number]> = [
+      [66 + stage, 94 + stage * 2],
+      [94 + stage * 2, 140 + stage * 3],
+      [108 + stage * 2, 158 + stage * 3],
+      [stage < 2 ? 176 + stage * 10 : 196 + stage * 4, stage < 2 ? 228 + stage * 10 : 246 + stage * 3],
+      [112 + stage * 2, 164 + stage * 3],
+      [72 + stage, 106 + stage * 2],
+      [138 + stage * 3, 204 + stage * 4],
+    ];
+    const [gapMin, gapMax] = sceneGapRanges[scene];
+    let gap = randomBetween(gapMin, Math.min(gapMax, 268));
+    const springFlight = state.springTargetY > state.generatedTo;
+    const springLanding = springFlight && state.generatedTo + gap >= state.springTargetY;
+    if (springLanding) gap = state.springTargetY - state.generatedTo;
     const y = state.generatedTo + gap;
-    const maxShift = 130 + difficulty * 40;
-    let x = state.lastPlatformX + (Math.random() - 0.5) * maxShift * 2;
-    x = Math.max(66, Math.min(WIDTH - 66, x));
+    const previousX = state.lastPlatformX;
+    const cornerRange: [number, number] = state.routeDirection < 0 ? [40, 168] : [WIDTH - 168, WIDTH - 40];
+    const preferredRange = scene === 4
+      ? cornerRange
+      : scene === 3 && Math.random() < .42
+        ? (Math.random() < .5 ? [40, 182] as [number, number] : [WIDTH - 182, WIDTH - 40] as [number, number])
+        : undefined;
+    let x = nextFieldX(state, y, difficulty, preferredRange);
 
-    const roll = Math.random();
     let kind: PlatformKind = "flower";
-    if (y > 350 && roll < 0.08 + difficulty * 0.09) kind = "broken";
-    else if (y > 520 && roll < 0.13 + difficulty * 0.06) kind = "spring";
-    else if (roll > 0.92) kind = "gold";
-    const width = Math.max(78, 116 - difficulty * 24 + Math.random() * 22);
-    state.platforms.push({ id: state.nextId++, x, y, width, kind, used: false, breaking: 0 });
+    const springIntervals = [999, 21, 19, 17, 15, 14];
+    const springReady = stage >= 1 && step - state.lastSpringStep >= springIntervals[stage];
+    const rocketReady = y >= state.nextRocketY;
+    const copterReady = y >= state.nextCopterY;
+    const sceneSpring = scene === 5 && sceneStep >= 2 && Math.random() < .24;
+    if ((sceneSpring || (springReady && scene !== 3 && sceneStep >= 2 && Math.random() < .2)) && !rocketReady && !copterReady && state.springTargetY <= state.generatedTo) {
+      kind = "spring";
+      state.lastSpringStep = step;
+    } else if (meters > 120 && stage >= 1 && (scene === 2 || scene === 4) && Math.random() < .32) {
+      kind = "cloud";
+    } else if (stage >= 2 && scene === 1 && Math.random() < .18) {
+      kind = "moving";
+    } else if (stage >= 3 && scene === 6 && Math.random() < .22) {
+      kind = "fading";
+    }
 
-    if (Math.random() < 0.34) {
-      const side = x < WIDTH / 2 ? 1 : -1;
-      const secondX = Math.max(62, Math.min(WIDTH - 62, x + side * (145 + Math.random() * 85)));
-      state.platforms.push({
+    if (springLanding) {
+      x = state.springTargetX;
+      kind = stage >= 3 ? "cloud" : "flower";
+      state.springTargetY = -1;
+    }
+
+    let width = Math.max(46, 80 - difficulty * 25 + randomBetween(-6, 7));
+    if (scene === 0 || scene === 5) width += 4;
+    if (scene === 3 || scene === 6) width -= 3;
+    if (kind === "spring") width = Math.max(width, 76);
+    if (kind === "cloud") width = Math.max(50, 72 - difficulty * 20 + Math.random() * 6);
+    if (springLanding) width = 84;
+    if (state.rocketRecoveryY > 0 && y >= state.rocketRecoveryY) {
+      x = state.rocketRecoveryX;
+      width = 88;
+      kind = "flower";
+      state.rocketRecoveryY = 0;
+    } else if (state.copterRecoveryY > 0 && y >= state.copterRecoveryY) {
+      x = state.copterRecoveryX;
+      width = 84;
+      kind = "flower";
+      state.copterRecoveryY = 0;
+    }
+    state.platforms = state.platforms.filter((existing) => (
+      existing.route !== "risk"
+      || !platformPlacementOverlaps([existing], x, y, width)
+    ));
+    const platform: Platform = { id: state.nextId++, x, y, width, kind, used: false, breaking: 0 };
+    if (kind === "moving" || kind === "cloud") {
+      platform.baseX = x;
+      platform.range = springLanding ? 38 : Math.min(82, 44 + difficulty * 38);
+      platform.speed = 1 + difficulty * .45 + Math.random() * .5;
+      platform.phase = Math.random() * Math.PI * 2;
+    }
+    if (kind === "spring") {
+      state.springTargetY = y + randomBetween(570, 620);
+      state.springTargetX = x;
+    }
+    state.platforms.push(platform);
+
+    const extraCount = springLanding || meters < 80 ? 0
+      : scene === 0 ? (Math.random() < .58 ? 2 : 1)
+      : scene === 1 ? (Math.random() < .38 ? 2 : 1)
+      : scene === 4 ? 1
+      : scene === 5 ? (Math.random() < .48 ? 1 : 0)
+      : scene === 2 ? (Math.random() < .56 ? 1 : 0)
+      : scene === 6 ? (Math.random() < .46 ? 1 : 0)
+      : (Math.random() < .1 ? 1 : 0);
+    const makePrimaryBroken = meters > 110
+      && kind === "flower"
+      && extraCount > 0
+      && Math.random() < [.18, .28, .36, .43, .5, .56][stage];
+    let safeExtraAdded = false;
+    for (let extraIndex = 0; extraIndex < extraCount; extraIndex += 1) {
+      const extraRoll = Math.random();
+      let extraKind: PlatformKind = "flower";
+      const brokenRate = [.36, .5, .56, .61, .66, .7][stage];
+      const normalRate = scene === 0 ? .78
+        : scene === 1 ? .7
+        : scene === 4 ? .52
+        : scene === 5 ? .66
+        : scene === 2 ? .45
+        : scene === 6 ? .3
+        : .22;
+      const mustBeSafe = makePrimaryBroken && !safeExtraAdded;
+      if (mustBeSafe || extraRoll < normalRate) extraKind = "flower";
+      else if (meters > 90 && extraRoll < Math.max(normalRate, brokenRate)) extraKind = "broken";
+      else if (stage >= 2 && extraRoll < brokenRate + .12) extraKind = Math.random() < .5 ? "moving" : "cloud";
+      else if (stage >= 3 && extraRoll < brokenRate + .18) extraKind = "fading";
+      const extraWidth = extraKind === "broken"
+        ? Math.max(44, 62 - difficulty * 13)
+        : Math.max(44, width - randomBetween(6, 14));
+      let extraY = y + randomBetween(-48, 24);
+      const forkRange: [number, number] | undefined = scene === 1
+        ? (x < WIDTH / 2 ? [WIDTH / 2 + 24, WIDTH - 42] : [42, WIDTH / 2 - 24])
+        : scene === 4 ? cornerRange : undefined;
+      let extraX = extraKind === "broken"
+        ? randomBetween(44, WIDTH - 44)
+        : nextFieldX(state, extraY, difficulty, forkRange);
+      let tries = 0;
+      while (tries < 14 && platformPlacementOverlaps(state.platforms, extraX, extraY, extraWidth)) {
+        extraY = y + randomBetween(-48, 24);
+        extraX = extraKind === "broken"
+          ? randomBetween(44, WIDTH - 44)
+          : nextFieldX(state, extraY, difficulty, forkRange);
+        tries += 1;
+      }
+      if (platformPlacementOverlaps(state.platforms, extraX, extraY, extraWidth)) continue;
+      const extraPlatform: Platform = {
         id: state.nextId++,
-        x: secondX,
-        y: y + (Math.random() - 0.5) * 18,
-        width: Math.max(76, width - 6),
-        kind: Math.random() < 0.1 ? "broken" : "flower",
+        x: extraX,
+        y: extraY,
+        width: extraWidth,
+        kind: extraKind,
         used: false,
         breaking: 0,
-      });
+        route: extraKind === "broken" ? "risk" : undefined,
+      };
+      if (extraKind === "moving" || extraKind === "cloud") {
+        extraPlatform.baseX = extraX;
+        extraPlatform.range = 34 + difficulty * 38;
+        extraPlatform.speed = .9 + difficulty * .45 + Math.random() * .4;
+        extraPlatform.phase = Math.random() * Math.PI * 2;
+      }
+      state.platforms.push(extraPlatform);
+      if (extraKind !== "broken") safeExtraAdded = true;
+    }
+    if (makePrimaryBroken && safeExtraAdded) {
+      platform.kind = "broken";
+      platform.route = "risk";
     }
 
-    const obstacleRoll = Math.random();
-    if (y > 260 && obstacleRoll < 0.18 + difficulty * 0.12) {
-      const kind: AirKind = obstacleRoll < 0.085 ? "bear" : "web";
-      let itemX = 58 + Math.random() * (WIDTH - 116);
-      if (Math.abs(itemX - x) < 92) itemX = itemX < WIDTH / 2 ? Math.max(50, itemX - 125) : Math.min(WIDTH - 50, itemX + 125);
-      state.airItems.push({ id: state.nextId++, x: itemX, y: y + gap * 0.48, kind, used: false });
+    const addDangerOnlyBait = !springLanding
+      && meters > 110
+      && (scene === 6 || (scene === 3 && gap > 190))
+      && Math.random() < .46;
+    if (addDangerOnlyBait) {
+      const baitY = state.generatedTo + gap * randomBetween(.38, .58);
+      const baitWidth = Math.max(42, 58 - difficulty * 10);
+      let baitX = randomBetween(46, WIDTH - 46);
+      let tries = 0;
+      while (tries < 12 && platformPlacementOverlaps(state.platforms, baitX, baitY, baitWidth)) {
+        baitX = randomBetween(46, WIDTH - 46);
+        tries += 1;
+      }
+      if (!platformPlacementOverlaps(state.platforms, baitX, baitY, baitWidth)) {
+        state.platforms.push({
+          id: state.nextId++,
+          x: baitX,
+          y: baitY,
+          width: baitWidth,
+          kind: "broken",
+          used: false,
+          breaking: 0,
+          route: "risk",
+        });
+      }
     }
-    if (y > 700 && Math.floor(y / 1100) > Math.floor(state.generatedTo / 1100)) {
-      state.airItems.push({ id: state.nextId++, x: 75 + Math.random() * (WIDTH - 150), y: y + 26, kind: "rocket", used: false });
+
+    const rewardStep = sceneStep >= 2 && (scene === 1 || scene === 3 || scene === 6 || Math.random() < .18);
+    if (meters > 45 && rewardStep && step - state.lastJarStep >= Math.round(8 - difficulty) && !rocketReady && !copterReady) {
+      const outward = x < WIDTH / 2 ? 1 : -1;
+      const rewardRisk = scene === 3 || scene === 6;
+      const jarX = Math.max(38, Math.min(WIDTH - 38, x + outward * (rewardRisk ? 76 : 48)));
+      state.airItems.push({ id: state.nextId++, x: jarX, y: y + 48, kind: "honeyJar", used: false, value: rewardRisk ? 100 : 50 });
+      state.lastJarStep = step;
+    }
+
+    const hazardGap = [11, 10, 9, 8, 7, 6][stage];
+    const earlyHazard = meters > 90 && (
+      (scene === 1 && sceneStep >= 2)
+      || (scene === 0 && sceneStep >= 3 && Math.random() < .28)
+      || (scene === 5 && sceneStep >= 3 && Math.random() < .2)
+    );
+    const routeHazard = earlyHazard || (
+      stage >= 1 && (
+        (scene === 2 && sceneStep >= 2)
+        || (scene === 4 && sceneStep % 2 === 1)
+        || (scene === 6 && sceneStep >= 1)
+        || (scene === 3 && stage >= 3 && Math.random() < .25)
+      )
+    );
+    if (!rocketReady && !copterReady && routeHazard && step - state.lastHazardStep >= hazardGap) {
+      const webReady = meters > 160;
+      const hazardRoll = Math.random();
+      let hazardKind: AirKind = "bear";
+      if (stage >= 3 && meters > 900 && hazardRoll < .14) hazardKind = "blackHole";
+      else if (stage >= 2 && meters > 480 && hazardRoll < .33) hazardKind = "bat";
+      else if (stage >= 1 && meters > 260 && hazardRoll < .52) hazardKind = "hornet";
+      else if (webReady && (scene === 3 || scene === 6 || step % 3 === 0 || hazardRoll < .72)) hazardKind = "web";
+      const corridorX = (previousX + x) / 2;
+      const blocksCorridor = scene === 4 || scene === 6 || Math.random() < .62;
+      let itemX = blocksCorridor ? corridorX + randomBetween(-30, 30) : randomBetween(52, WIDTH - 52);
+      itemX = Math.max(44, Math.min(WIDTH - 44, itemX));
+      const item: AirItem = { id: state.nextId++, x: itemX, y: state.generatedTo + gap * randomBetween(.44, .62), kind: hazardKind, used: false };
+      if (hazardKind === "bear" || hazardKind === "hornet" || hazardKind === "bat") {
+        item.baseX = itemX;
+        item.range = hazardKind === "bear" ? 38 + difficulty * 34 : 54 + difficulty * 42;
+        item.speed = hazardKind === "bear" ? .9 + difficulty * .4 : 1.35 + difficulty * .7;
+        item.phase = Math.random() * Math.PI * 2;
+      }
+      state.airItems.push(item);
+      state.lastHazardStep = step;
+    }
+
+    if (rocketReady && kind === "flower") {
+      state.airItems.push({ id: state.nextId++, x, y: y + 57, kind: "rocket", used: false });
+      state.rocketRecoveryY = y + ROCKET_RECOVERY_DISTANCE;
+      state.rocketRecoveryX = Math.max(86, Math.min(WIDTH - 86, x));
+      state.nextRocketY += ROCKET_INTERVAL_WORLD;
+    } else if (copterReady && kind === "flower") {
+      state.airItems.push({ id: state.nextId++, x, y: y + 48, kind: "bambooCopter", used: false });
+      state.copterRecoveryY = y + COPTER_RECOVERY_DISTANCE;
+      state.copterRecoveryX = Math.max(82, Math.min(WIDTH - 82, x));
+      state.nextCopterY += COPTER_INTERVAL_WORLD;
     }
 
     state.generatedTo = y;
     state.lastPlatformX = x;
+    state.routeStep += 1;
+    state.sceneRemaining -= 1;
+    state.sceneProgress += 1;
+  }
+}
+
+function isLandingPlatform(platform: Platform) {
+  return platform.kind !== "broken" && platform.breaking < .38;
+}
+
+function canJumpBetween(from: Platform, to: Platform, difficulty: number) {
+  const verticalGap = to.y - from.y;
+  if (verticalGap <= 34 || verticalGap >= 278) return false;
+  const directDistance = Math.abs(to.x - from.x);
+  const wrappedDistance = WIDTH - directDistance;
+  const landingAllowance = Math.min(28, (from.width + to.width) * .18);
+  return Math.min(directDistance, wrappedDistance) <= horizontalReachForGap(verticalGap, difficulty) + landingAllowance;
+}
+
+function reachablePlatforms(starts: Platform[], field: Platform[], difficulty: number) {
+  const reachable = starts.filter(isLandingPlatform);
+  const sorted = [...field].sort((a, b) => a.y - b.y);
+  for (const candidate of sorted) {
+    if (!isLandingPlatform(candidate)) continue;
+    if (reachable.some((support) => canJumpBetween(support, candidate, difficulty))) reachable.push(candidate);
+  }
+  return reachable;
+}
+
+function generateWorld(state: GameState, targetY: number) {
+  while (state.generatedTo < targetY) {
+    const chunkBottom = state.generatedTo;
+    const meters = heightMeters(chunkBottom);
+    const stage = progressionStageAtHeight(meters);
+    const difficulty = linearDifficultyAtHeight(meters);
+    chooseRouteScene(state, stage);
+    const scene = state.routePattern;
+    const chunkHeight = randomBetween(760, 840);
+    const chunkTop = chunkBottom + chunkHeight;
+    const field: Platform[] = [];
+
+    const pushPlatform = (x: number, y: number, width: number, kind: PlatformKind) => {
+      const platform: Platform = {
+        id: state.nextId++,
+        x: clampNumber(x, width / 2 + 8, WIDTH - width / 2 - 8),
+        y,
+        width,
+        kind,
+        used: false,
+        breaking: 0,
+      };
+      if (kind === "moving" || kind === "cloud") {
+        platform.baseX = platform.x;
+        platform.range = 34 + difficulty * 42;
+        platform.speed = .9 + difficulty * .5 + Math.random() * .45;
+        platform.phase = Math.random() * Math.PI * 2;
+      }
+      field.push(platform);
+      return platform;
+    };
+
+    const addRecoveryPlatform = (recoveryY: number, recoveryX: number, clear: () => void) => {
+      if (recoveryY <= 0 || recoveryY > chunkTop) return;
+      const y = Math.max(chunkBottom + 62, recoveryY);
+      field.splice(0, field.length, ...field.filter((platform) => !platformPlacementOverlaps([platform], recoveryX, y, 84)));
+      pushPlatform(recoveryX, y, 84, "flower");
+      clear();
+    };
+
+    addRecoveryPlatform(state.springTargetY, state.springTargetX, () => { state.springTargetY = -1; });
+    addRecoveryPlatform(state.rocketRecoveryY, state.rocketRecoveryX, () => { state.rocketRecoveryY = 0; });
+    addRecoveryPlatform(state.copterRecoveryY, state.copterRecoveryX, () => { state.copterRecoveryY = 0; });
+
+    const zoneGapRanges: Array<[number, number]> = [
+      [66 + difficulty * 18, 90 + difficulty * 24],
+      [82 + difficulty * 26, 116 + difficulty * 36],
+      [88 + difficulty * 28, 124 + difficulty * 40],
+      [122 + difficulty * 24, 174 + difficulty * 56],
+      [96 + difficulty * 28, 136 + difficulty * 42],
+      [76 + difficulty * 22, 108 + difficulty * 34],
+      [108 + difficulty * 28, 154 + difficulty * 54],
+    ];
+    const supports = state.platforms.filter((platform) => (
+      isLandingPlatform(platform)
+      && platform.y <= chunkBottom + 18
+      && platform.y > chunkBottom - 320
+    ));
+    if (supports.length === 0) {
+      supports.push({
+        id: -1,
+        x: state.lastPlatformX,
+        y: chunkBottom,
+        width: 72,
+        kind: "flower",
+        used: true,
+        breaking: 0,
+      });
+    }
+
+    let reachable = reachablePlatforms(supports, field, difficulty);
+    const [gapMin, gapMax] = zoneGapRanges[scene];
+    // 原版大多数高度只有一个平台；选择来自一次跳跃可跨过的前方2～3个平台，
+    // 而不是在同一高度整齐摆放两三块平台。
+    const optionBase = [1.34, 1.24, 1.16, 1.03, 1.12, 1.26, 1.06][scene];
+    const minimumOptions = 1;
+    const cornerSide = state.routeDirection < 0 ? -1 : 1;
+    let rowY = chunkBottom + randomBetween(82, 112);
+    let rowIndex = 0;
+
+    const randomFieldX = (optionIndex: number) => {
+      if (scene === 1 && Math.random() < .78) {
+        const leftSide = (rowIndex + optionIndex) % 2 === 0;
+        return leftSide ? randomBetween(42, 196) : randomBetween(WIDTH - 196, WIDTH - 42);
+      }
+      if (scene === 4 && Math.random() < .72) {
+        return cornerSide < 0 ? randomBetween(42, 188) : randomBetween(WIDTH - 188, WIDTH - 42);
+      }
+      return randomBetween(42, WIDTH - 42);
+    };
+
+    while (rowY < chunkTop - 44 && rowIndex < 10) {
+      const optionFloat = Math.max(1, optionBase - difficulty * .58);
+      let safeCount = Math.floor(optionFloat) + (Math.random() < optionFloat % 1 ? 1 : 0);
+      safeCount = clampNumber(safeCount, minimumOptions, 3);
+      if (scene === 3 || scene === 6) safeCount = 1;
+
+      const rowPlatforms: Platform[] = [];
+      for (let optionIndex = 0; optionIndex < safeCount; optionIndex += 1) {
+        const y = rowY + randomBetween(-20, 20);
+        const sourcePool = reachable.filter((platform) => {
+          const gap = y - platform.y;
+          return gap > 38 && gap < 274;
+        });
+        if (sourcePool.length === 0) continue;
+
+        const widthBonus = scene === 0 ? 8 : scene === 3 || scene === 6 ? -3 : 0;
+        const width = Math.max(52, 92 - difficulty * 32 + widthBonus + randomBetween(-7, 7));
+        let x = randomFieldX(optionIndex);
+        let placed = false;
+        for (let tries = 0; tries < 28; tries += 1) {
+          const candidate: Platform = { id: -1, x, y, width, kind: "flower", used: false, breaking: 0 };
+          const reachableFromField = sourcePool.some((source) => canJumpBetween(source, candidate, difficulty));
+          const separatedFromRow = rowPlatforms.every((platform) => Math.abs(platform.x - x) > 104);
+          if (reachableFromField && separatedFromRow && !platformPlacementOverlaps(field, x, y, width)) {
+            placed = true;
+            break;
+          }
+          x = randomFieldX(optionIndex + tries + 1);
+        }
+
+        if (!placed) {
+          const source = sourcePool[Math.floor(Math.random() * sourcePool.length)];
+          const reach = horizontalReachForGap(y - source.y, difficulty) * .72;
+          for (let tries = 0; tries < 16; tries += 1) {
+            x = clampNumber(source.x + randomBetween(-reach, reach), width / 2 + 8, WIDTH - width / 2 - 8);
+            if (!platformPlacementOverlaps(field, x, y, width)) {
+              placed = true;
+              break;
+            }
+          }
+        }
+        if (!placed) continue;
+
+        let kind: PlatformKind = "flower";
+        const movingChance = scene === 2 ? .28 + difficulty * .18 : .025 + difficulty * .07;
+        if (stage >= 1 && Math.random() < movingChance) kind = Math.random() < .56 ? "moving" : "cloud";
+        else if (stage >= 3 && Math.random() < .025 + difficulty * .07) kind = "fading";
+        const platform = pushPlatform(x, y, width, kind);
+        rowPlatforms.push(platform);
+      }
+
+      reachable = reachablePlatforms(supports, field, difficulty);
+
+      // 破碎花从开局即可出现，但只作为额外的诱导落点，绝不替换本行唯一的安全花。
+      const brokenChance = .13 + difficulty * .27 + (scene === 6 ? .1 : 0);
+      if (Math.random() < brokenChance) {
+        const brokenWidth = Math.max(46, 64 - difficulty * 12 + randomBetween(-5, 5));
+        for (let tries = 0; tries < 18; tries += 1) {
+          const brokenX = randomBetween(brokenWidth / 2 + 8, WIDTH - brokenWidth / 2 - 8);
+          const brokenY = rowY + randomBetween(-34, 34);
+          if (!platformPlacementOverlaps(field, brokenX, brokenY, brokenWidth)) {
+            pushPlatform(brokenX, brokenY, brokenWidth, "broken");
+            break;
+          }
+        }
+      }
+
+      const nextGap = randomBetween(gapMin, gapMax);
+      rowY += Math.min(246, nextGap);
+      rowIndex += 1;
+    }
+
+    // 极端随机情况下补一组顶部出口；出口来自当前整个可达前沿，而非固定主路线。
+    reachable = reachablePlatforms(supports, field, difficulty);
+    const highestReachable = Math.max(...reachable.map((platform) => platform.y));
+    if (highestReachable < chunkTop - 150) {
+      const topY = Math.min(chunkTop - 72, highestReachable + randomBetween(118, 176));
+      const sources = reachable.filter((platform) => topY - platform.y > 38 && topY - platform.y < 274);
+      const source = sources[Math.floor(Math.random() * sources.length)];
+      if (source) {
+        const width = Math.max(56, 88 - difficulty * 28);
+        const reach = horizontalReachForGap(topY - source.y, difficulty) * .7;
+        const x = clampNumber(source.x + randomBetween(-reach, reach), width / 2 + 8, WIDTH - width / 2 - 8);
+        pushPlatform(x, topY, width, "flower");
+      }
+    }
+
+    if (meters < 120 && !field.some((platform) => platform.kind === "broken")) {
+      const brokenWidth = 62;
+      for (let tries = 0; tries < 20; tries += 1) {
+        const x = randomBetween(42, WIDTH - 42);
+        const y = randomBetween(chunkBottom + 150, chunkTop - 130);
+        if (!platformPlacementOverlaps(field, x, y, brokenWidth)) {
+          pushPlatform(x, y, brokenWidth, "broken");
+          break;
+        }
+      }
+    }
+
+    reachable = reachablePlatforms(supports, field, difficulty);
+    const safeField = field.filter((platform) => isLandingPlatform(platform) && reachable.some((reachablePlatform) => reachablePlatform.id === platform.id));
+    const springIntervals = [14, 18, 17, 16, 15, 14];
+    if (
+      state.springTargetY <= chunkBottom
+      && state.routeStep - state.lastSpringStep >= springIntervals[stage]
+      && chunkTop < state.nextRocketY
+      && chunkTop < state.nextCopterY
+    ) {
+      const springCandidates = safeField.filter((platform) => (
+        platform.kind === "flower"
+        && platform.y > chunkTop - 520
+        && platform.y < chunkTop - 250
+      ));
+      const spring = springCandidates[Math.floor(Math.random() * springCandidates.length)];
+      if (spring) {
+        spring.kind = "spring";
+        spring.width = Math.max(72, spring.width);
+        state.springTargetY = spring.y + randomBetween(570, 610);
+        state.springTargetX = spring.x;
+        state.lastSpringStep = state.routeStep;
+      }
+    }
+
+    const placeBoost = (kind: "rocket" | "bambooCopter", threshold: number) => {
+      if (threshold > chunkTop) return false;
+      const candidates = safeField.filter((platform) => platform.kind === "flower" && platform.y >= threshold - 180);
+      const platform = candidates[Math.floor(Math.random() * candidates.length)];
+      if (!platform) return false;
+      state.airItems.push({
+        id: state.nextId++,
+        x: platform.x,
+        y: platform.y + (kind === "rocket" ? 57 : 48),
+        kind,
+        used: false,
+      });
+      if (kind === "rocket") {
+        state.rocketRecoveryY = platform.y + ROCKET_RECOVERY_DISTANCE;
+        state.rocketRecoveryX = platform.x;
+        state.nextRocketY += ROCKET_INTERVAL_WORLD;
+      } else {
+        state.copterRecoveryY = platform.y + COPTER_RECOVERY_DISTANCE;
+        state.copterRecoveryX = platform.x;
+        state.nextCopterY += COPTER_INTERVAL_WORLD;
+      }
+      return true;
+    };
+    const rocketPlaced = placeBoost("rocket", state.nextRocketY);
+    if (!rocketPlaced) placeBoost("bambooCopter", state.nextCopterY);
+
+    if (meters > 45 && safeField.length > 0 && Math.random() < .72) {
+      const jarPlatform = safeField[Math.floor(Math.random() * safeField.length)];
+      const value = scene === 3 || scene === 6 ? 100 : 50;
+      state.airItems.push({
+        id: state.nextId++,
+        x: jarPlatform.x,
+        y: jarPlatform.y + 48,
+        kind: "honeyJar",
+        used: false,
+        value,
+      });
+    }
+
+    const hazardChance = .08 + difficulty * .34 + (scene === 6 ? .12 : 0);
+    const hazardCount = meters < 260 || scene === 3
+      ? 0
+      : Math.random() < hazardChance
+        ? 1 + (difficulty > .72 && Math.random() < difficulty * .18 ? 1 : 0)
+        : 0;
+    for (let index = 0; index < hazardCount; index += 1) {
+      const hazardRoll = Math.random();
+      let kind: AirKind = "bear";
+      if (stage >= 3 && meters > 900 && hazardRoll < .14) kind = "blackHole";
+      else if (stage >= 2 && meters > 480 && hazardRoll < .34) kind = "bat";
+      else if (stage >= 1 && meters > 260 && hazardRoll < .54) kind = "hornet";
+      else if (meters > 420 && hazardRoll < .76) kind = "web";
+      const lower = safeField[Math.floor(Math.random() * safeField.length)];
+      const upperCandidates = lower
+        ? safeField.filter((platform) => platform.y > lower.y + 54 && platform.y < lower.y + 250)
+        : [];
+      const upper = upperCandidates[Math.floor(Math.random() * upperCandidates.length)];
+      const x = lower && upper
+        ? clampNumber((lower.x + upper.x) / 2 + randomBetween(-42, 42), 48, WIDTH - 48)
+        : randomBetween(48, WIDTH - 48);
+      const item: AirItem = {
+        id: state.nextId++,
+        x,
+        y: lower && upper ? (lower.y + upper.y) / 2 : randomBetween(chunkBottom + 150, chunkTop - 90),
+        kind,
+        used: false,
+      };
+      if (kind === "bear" || kind === "hornet" || kind === "bat") {
+        item.baseX = x;
+        item.range = kind === "bear" ? 38 + difficulty * 34 : 54 + difficulty * 42;
+        item.speed = kind === "bear" ? .9 + difficulty * .4 : 1.35 + difficulty * .7;
+        item.phase = Math.random() * Math.PI * 2;
+      }
+      state.airItems.push(item);
+      state.lastHazardStep = state.routeStep;
+    }
+
+    state.platforms.push(...field);
+    const topReachable = [...reachablePlatforms(supports, field, difficulty)].sort((a, b) => b.y - a.y)[0];
+    if (topReachable) state.lastPlatformX = topReachable.x;
+    state.generatedTo = chunkTop;
+    state.routeStep += field.length;
+    state.sceneRemaining = 0;
+    state.sceneProgress = 0;
   }
 }
 
 function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, time: number) {
   const shake = p.breaking > 0 ? Math.sin(time * 0.09) * 5 : 0;
   ctx.save();
+  if (p.kind === "fading") ctx.globalAlpha = Math.max(.12, 1 - p.breaking * 2.7);
   ctx.translate(shake, 0);
-  ctx.strokeStyle = p.kind === "gold" ? "#c99410" : "#4f9954";
-  ctx.lineWidth = 6;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(p.x, sy + 7);
-  ctx.quadraticCurveTo(p.x + 9, sy + 28, p.x - 2, sy + 48);
-  ctx.stroke();
-  ctx.fillStyle = p.kind === "gold" ? "#ffe66d" : "#72c56f";
-  ctx.beginPath();
-  ctx.ellipse(p.x + 11, sy + 30, 13, 6, -0.4, 0, Math.PI * 2);
-  ctx.fill();
-
-  const petal = p.kind === "broken" ? "#c8b4ab" : p.kind === "gold" ? "#ffe35a" : "#ff82ad";
-  const edge = p.kind === "broken" ? "#917c74" : p.kind === "gold" ? "#e3a515" : "#e65e8e";
-  ctx.fillStyle = petal;
-  ctx.strokeStyle = edge;
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 7; i += 1) {
-    const px = p.x - p.width / 2 + 10 + (i * (p.width - 20)) / 6;
+  if (p.kind === "cloud") {
+    const cloudFill = ctx.createLinearGradient(0, sy - 10, 0, sy + 10);
+    cloudFill.addColorStop(0, "#ffffff");
+    cloudFill.addColorStop(1, "#bfe8f5");
+    ctx.fillStyle = "rgba(58,111,138,.16)";
     ctx.beginPath();
-    ctx.ellipse(px, sy, p.width / 8.5, 13, i % 2 ? 0.12 : -0.12, 0, Math.PI * 2);
+    ctx.ellipse(p.x, sy + 7, p.width * .48, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = cloudFill;
+    ctx.strokeStyle = "#477c98";
+    ctx.lineWidth = 2;
+    roundedRect(ctx, p.x - p.width * .48, sy - 3, p.width * .96, 13, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(p.x - p.width * .2, sy - 3, p.width * .18, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x + p.width * .05, sy - 6, p.width * .22, 9, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x + p.width * .28, sy - 2, p.width * .15, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.86)";
+    ctx.beginPath();
+    ctx.ellipse(p.x - p.width * .12, sy - 5, p.width * .18, 2.5, -.08, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+  const broken = p.kind === "broken";
+  const moving = p.kind === "moving";
+  const fading = p.kind === "fading";
+  const outline = "#4a3b30";
+  const petal = broken ? "#aa9386" : moving ? "#77c9ed" : fading ? "#f4d8e4" : "#ff9eb5";
+  const petalLight = broken ? "#d8c3b8" : moving ? "#c8f0ff" : fading ? "#fff7fb" : "#ffd0dc";
+  const center = broken ? "#765e52" : moving ? "#ffd765" : fading ? "#e9b6ca" : "#f6ad25";
+
+  ctx.fillStyle = "rgba(79,61,48,.13)";
+  ctx.beginPath();
+  ctx.ellipse(p.x, sy + 7, p.width * .49, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (!broken) {
+    ctx.fillStyle = moving ? "#5aa6d4" : fading ? "#bda8ba" : "#68b96b";
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    roundedRect(ctx, p.x - p.width * .43, sy, p.width * .86, 9, 5);
     ctx.fill();
     ctx.stroke();
   }
-  ctx.fillStyle = p.kind === "gold" ? "#f0aa10" : p.kind === "broken" ? "#7d6d67" : "#ffc229";
-  roundedRect(ctx, p.x - p.width / 2, sy - 6, p.width, 13, 7);
-  ctx.fill();
-  if (p.kind === "broken") {
-    ctx.strokeStyle = "#5e4c46";
-    ctx.lineWidth = 3;
+  ctx.fillStyle = petal;
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i += 1) {
+    const px = p.x - p.width * .27 + i * p.width * .27;
     ctx.beginPath();
-    ctx.moveTo(p.x - 9, sy - 6);
-    ctx.lineTo(p.x + 2, sy);
-    ctx.lineTo(p.x - 5, sy + 7);
+    ctx.ellipse(px, sy - (i === 1 ? 1.5 : 0), p.width * .245, i === 1 ? 8 : 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.fillStyle = petalLight;
+  ctx.globalAlpha = .72;
+  ctx.beginPath();
+  ctx.ellipse(p.x - p.width * .2, sy - 3, p.width * .16, 2, -.08, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = center;
+  ctx.strokeStyle = outline;
+  ctx.beginPath();
+  ctx.ellipse(p.x, sy, p.width * .23, 5.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  if (p.kind === "broken") {
+    ctx.strokeStyle = "#5b473c";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(p.x - 6, sy - 6);
+    ctx.lineTo(p.x + 1, sy - 1);
+    ctx.lineTo(p.x - 3, sy + 6);
+    ctx.moveTo(p.x + 3, sy - 3);
+    ctx.lineTo(p.x + 9, sy + 4);
     ctx.stroke();
   }
   if (p.kind === "spring") {
-    ctx.strokeStyle = "#54606b";
+    const compress = Math.sin(time * .012 + p.id) * 1.5;
+    ctx.fillStyle = "#ffd34d";
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    roundedRect(ctx, p.x - 16, sy - 13, 32, 7, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = "#eef5fb";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    for (let i = 0; i <= 12; i += 1) {
-      const px = p.x - 15 + i * 2.5;
-      const py = sy - 9 - (i % 2 ? 10 : 0);
+    for (let i = 0; i <= 6; i += 1) {
+      const px = p.x - 10 + i * 3.4;
+      const py = sy - 10 - (i % 2 ? 12 + compress : 0);
       if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.stroke();
-    ctx.fillStyle = "#697784";
-    roundedRect(ctx, p.x - 19, sy - 23, 38, 5, 3);
+    ctx.fillStyle = "#58a7d8";
+    roundedRect(ctx, p.x - 13, sy - 27 - compress, 26, 6, 3);
     ctx.fill();
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -222,11 +1131,48 @@ function drawBear(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.restore();
 }
 
-function drawWeb(ctx: CanvasRenderingContext2D, x: number, y: number) {
+function drawBearSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, time: number) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(time * .005) * 2);
+  ctx.rotate(Math.sin(time * .0035) * .025);
+  const pulse = 1 + Math.sin(time * .01) * .08;
+  ctx.strokeStyle = "rgba(221,66,53,.82)";
+  ctx.lineWidth = 4;
+  ctx.setLineDash([7, 6]);
+  ctx.beginPath();
+  ctx.arc(0, 0, 41 * pulse, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#df4939";
+  ctx.beginPath();
+  ctx.arc(27, -31, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "900 16px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("!", 27, -25);
+  const height = 60;
+  const width = height * (image.naturalWidth / image.naturalHeight);
+  ctx.shadowColor = "rgba(69,42,25,.24)";
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 4;
+  ctx.drawImage(image, -width / 2, -height / 2, width, height);
+  ctx.restore();
+}
+
+function drawWeb(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.strokeStyle = "rgba(255,255,255,.94)";
-  ctx.lineWidth = 2;
+  ctx.rotate(time * .00045);
+  const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, 42);
+  glow.addColorStop(0, "rgba(57,28,72,.76)");
+  glow.addColorStop(1, "rgba(131,73,154,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, 42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(69,43,83,.94)";
+  ctx.lineWidth = 3;
   for (let i = 0; i < 8; i += 1) {
     const angle = (Math.PI * 2 * i) / 8;
     ctx.beginPath();
@@ -239,6 +1185,157 @@ function drawWeb(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.stroke();
   }
+  ctx.fillStyle = "#321f3c";
+  ctx.beginPath();
+  ctx.arc(0, 0, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(x + 28, y - 30);
+  ctx.fillStyle = "#df4939";
+  ctx.beginPath();
+  ctx.arc(0, 0, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "900 16px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("!", 0, 6);
+  ctx.restore();
+}
+
+function drawBlackHole(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(time * .001);
+  const glow = ctx.createRadialGradient(0, 0, 5, 0, 0, 48);
+  glow.addColorStop(0, "#05030c");
+  glow.addColorStop(.35, "#17102d");
+  glow.addColorStop(.66, "rgba(108,67,177,.88)");
+  glow.addColorStop(1, "rgba(125,93,193,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, 48, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineWidth = 5;
+  for (let ring = 0; ring < 3; ring += 1) {
+    ctx.strokeStyle = ring === 0 ? "#9f7bea" : ring === 1 ? "#5b3f99" : "rgba(213,180,255,.55)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 35 + ring * 6, 13 + ring * 4, ring * .55, .15, Math.PI * 1.65);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "#030209";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 24, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHornet(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(time * .012) * 3);
+  const flap = .45 + Math.abs(Math.sin(time * .05)) * .45;
+  ctx.fillStyle = "rgba(225,247,255,.82)";
+  ctx.strokeStyle = "#42382e";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(-17, -10, 15, 7 * flap, -.45, 0, Math.PI * 2);
+  ctx.ellipse(17, -10, 15, 7 * flap, .45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f5b91f";
+  ctx.strokeStyle = "#362c26";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(0, 1, 24, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = "#342a25";
+  ctx.fillRect(-8, -20, 7, 42);
+  ctx.fillRect(9, -20, 7, 42);
+  ctx.restore();
+  ctx.fillStyle = "#d74b45";
+  ctx.beginPath();
+  ctx.moveTo(-23, 1);
+  ctx.lineTo(-34, 7);
+  ctx.lineTo(-24, 11);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(-7, -5, 4.5, 0, Math.PI * 2);
+  ctx.arc(7, -5, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#201b19";
+  ctx.beginPath();
+  ctx.arc(-6, -4, 2.5, 0, Math.PI * 2);
+  ctx.arc(6, -4, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBat(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(time * .008) * 5);
+  const flap = Math.sin(time * .018) * 8;
+  ctx.fillStyle = "#52406e";
+  ctx.strokeStyle = "#2c2338";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-5, -4);
+  ctx.quadraticCurveTo(-31, -26 - flap, -40, 4);
+  ctx.quadraticCurveTo(-27, -4, -21, 15 + flap * .35);
+  ctx.quadraticCurveTo(-12, 6, -4, 7);
+  ctx.moveTo(5, -4);
+  ctx.quadraticCurveTo(31, -26 - flap, 40, 4);
+  ctx.quadraticCurveTo(27, -4, 21, 15 + flap * .35);
+  ctx.quadraticCurveTo(12, 6, 4, 7);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#372b49";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 14, 18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-9, -12);
+  ctx.lineTo(-5, -26);
+  ctx.lineTo(1, -13);
+  ctx.moveTo(9, -12);
+  ctx.lineTo(5, -26);
+  ctx.lineTo(-1, -13);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffdf4d";
+  ctx.beginPath();
+  ctx.arc(-5, -3, 2.3, 0, Math.PI * 2);
+  ctx.arc(5, -3, 2.3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBambooCopter(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, attached = false) {
+  ctx.save();
+  ctx.translate(x, y + (attached ? -39 : Math.sin(time * .009) * 3));
+  ctx.strokeStyle = "#49392c";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(0, -18);
+  ctx.lineTo(0, 12);
+  ctx.stroke();
+  ctx.fillStyle = "#e5a72a";
+  ctx.beginPath();
+  ctx.ellipse(0, 12, 9, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  const spin = time * .025;
+  ctx.rotate(spin);
+  ctx.fillStyle = "#73c66e";
+  ctx.beginPath();
+  ctx.ellipse(-21, 0, 22, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(21, 0, 22, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -246,14 +1343,17 @@ function drawRocket(ctx: CanvasRenderingContext2D, x: number, y: number, time: n
   ctx.save();
   ctx.translate(x, y + Math.sin(time * 0.006) * 4);
   ctx.rotate(0.18);
-  ctx.fillStyle = "#f2f4f0";
+  ctx.fillStyle = "#fff8dc";
+  ctx.strokeStyle = "#493a30";
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(0, -35);
   ctx.quadraticCurveTo(25, -10, 14, 24);
   ctx.lineTo(-14, 24);
   ctx.quadraticCurveTo(-25, -10, 0, -35);
   ctx.fill();
-  ctx.fillStyle = "#ef5b4d";
+  ctx.stroke();
+  ctx.fillStyle = "#f07a5c";
   ctx.beginPath();
   ctx.moveTo(-14, 10);
   ctx.lineTo(-27, 27);
@@ -262,9 +1362,19 @@ function drawRocket(ctx: CanvasRenderingContext2D, x: number, y: number, time: n
   ctx.lineTo(27, 27);
   ctx.lineTo(10, 22);
   ctx.fill();
-  ctx.fillStyle = "#59b7dd";
+  ctx.stroke();
+  ctx.fillStyle = "#74c9df";
+  ctx.strokeStyle = "#493a30";
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
   ctx.arc(0, -8, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f5b526";
+  ctx.beginPath();
+  ctx.moveTo(0, 4);
+  ctx.quadraticCurveTo(9, 14, 0, 19);
+  ctx.quadraticCurveTo(-9, 14, 0, 4);
   ctx.fill();
   ctx.fillStyle = "#ffb31d";
   ctx.beginPath();
@@ -272,13 +1382,58 @@ function drawRocket(ctx: CanvasRenderingContext2D, x: number, y: number, time: n
   ctx.lineTo(0, 48 + Math.sin(time * 0.025) * 8);
   ctx.lineTo(8, 25);
   ctx.fill();
+  ctx.fillStyle = "#fff4a8";
+  ctx.beginPath();
+  ctx.moveTo(-4, 26);
+  ctx.lineTo(0, 40 + Math.sin(time * .03) * 5);
+  ctx.lineTo(4, 26);
+  ctx.fill();
   ctx.restore();
 }
 
-function drawBee(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, time: number, blink: boolean, rocket: boolean) {
+function drawHoneyJar(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, value = 20) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(time * .006 + x) * 3);
+  const glow = ctx.createRadialGradient(0, 3, 2, 0, 3, 34);
+  glow.addColorStop(0, "rgba(255,226,91,.55)");
+  glow.addColorStop(1, "rgba(255,207,52,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 3, 34, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff5ce";
+  ctx.strokeStyle = "#4a392c";
+  ctx.lineWidth = 2.6;
+  roundedRect(ctx, -17, -18, 34, 39, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f6b91f";
+  roundedRect(ctx, -13, -5, 26, 22, 7);
+  ctx.fill();
+  ctx.fillStyle = "#8b5830";
+  roundedRect(ctx, -19, -23, 38, 8, 4);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  ctx.beginPath();
+  ctx.ellipse(-7, -10, 3, 7, .25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff8dc";
+  ctx.font = "900 11px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`+${value}`, 0, 10);
+  ctx.fillStyle = "#7a4c16";
+  ctx.font = "900 10px sans-serif";
+  ctx.fillText("蜂蜜", 0, 34);
+  ctx.restore();
+}
+
+function drawBee(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, time: number, blink: boolean, rocket: boolean, facing: -1 | 1) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(Math.max(-0.22, Math.min(0.22, vx / 900)));
+  ctx.scale(facing, 1);
+  const stretch = rocket ? 1.1 : vy > 120 ? 1.035 : vy < -120 ? .97 : .92;
+  ctx.scale(2 - stretch, stretch);
   if (blink && Math.floor(time / 90) % 2 === 0) ctx.globalAlpha = 0.36;
   if (rocket) {
     const flame = 34 + Math.sin(time * 0.03) * 9;
@@ -289,19 +1444,50 @@ function drawBee(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number
     ctx.lineTo(10, 27);
     ctx.fill();
   }
-  const beat = 0.85 + Math.sin(time * 0.05) * 0.16;
-  ctx.fillStyle = "rgba(240,253,255,.84)";
-  ctx.strokeStyle = "rgba(86,151,170,.45)";
+  const beat = 0.86 + Math.sin(time * 0.052) * 0.15;
+  ctx.fillStyle = "rgba(239,252,255,.9)";
+  ctx.strokeStyle = "rgba(61,111,126,.52)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.ellipse(-23, -3, 13 * beat, 25, -0.72, 0, Math.PI * 2);
   ctx.ellipse(23, -3, 13 * beat, 25, 0.72, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+  ctx.fillStyle = "#ef6f51";
+  ctx.beginPath();
+  ctx.moveTo(-13, -2);
+  ctx.quadraticCurveTo(-34 - vx * .035, 3, -42 - vx * .05, 16);
+  ctx.quadraticCurveTo(-25, 12, -9, 10);
+  ctx.closePath();
+  ctx.fill();
   ctx.fillStyle = "#ffcb29";
+  ctx.strokeStyle = "#45372d";
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.ellipse(0, 3, 23, 29, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "#45372d";
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-18, 5);
+  ctx.quadraticCurveTo(-29, 8, -31, 17);
+  ctx.moveTo(18, 5);
+  ctx.quadraticCurveTo(29, 8, 31, 17);
+  ctx.moveTo(-10, 27);
+  ctx.lineTo(-12, 36);
+  ctx.lineTo(-20, 38);
+  ctx.moveTo(10, 27);
+  ctx.lineTo(12, 36);
+  ctx.lineTo(20, 38);
+  ctx.stroke();
+  ctx.fillStyle = "#ffdf62";
+  ctx.beginPath();
+  ctx.arc(-31, 18, 4, 0, Math.PI * 2);
+  ctx.arc(31, 18, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
   ctx.save();
   ctx.clip();
   ctx.fillStyle = "#403128";
@@ -309,46 +1495,191 @@ function drawBee(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number
   ctx.fillRect(-22, 15, 44, 7);
   ctx.restore();
   ctx.fillStyle = "#ffdf62";
+  ctx.strokeStyle = "#45372d";
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(0, -18, 21, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#f6bd28";
+  ctx.beginPath();
+  ctx.moveTo(-6, -38);
+  ctx.quadraticCurveTo(0, -47, 6, -38);
+  ctx.quadraticCurveTo(0, -41, -6, -38);
+  ctx.fill();
+  ctx.strokeStyle = "#45372d";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(-9, -36);
+  ctx.quadraticCurveTo(-16, -48, -21, -44);
+  ctx.moveTo(9, -36);
+  ctx.quadraticCurveTo(16, -48, 21, -44);
+  ctx.stroke();
+  ctx.fillStyle = "#45372d";
+  ctx.beginPath();
+  ctx.arc(-21, -44, 3, 0, Math.PI * 2);
+  ctx.arc(21, -44, 3, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#2f251f";
   ctx.beginPath();
   ctx.arc(-7, -20, 3, 0, Math.PI * 2);
   ctx.arc(7, -20, 3, 0, Math.PI * 2);
   ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.9)";
+  ctx.beginPath();
+  ctx.arc(-8, -21, 1.1, 0, Math.PI * 2);
+  ctx.arc(6, -21, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(242,108,104,.62)";
+  ctx.beginPath();
+  ctx.arc(-13, -13, 4, 0, Math.PI * 2);
+  ctx.arc(13, -13, 4, 0, Math.PI * 2);
+  ctx.fill();
   ctx.strokeStyle = "#2f251f";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(0, -16, 6, 0.1, Math.PI - 0.1);
   ctx.stroke();
+  if (rocket) {
+    ctx.fillStyle = "rgba(74,139,160,.78)";
+    ctx.strokeStyle = "#45372d";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(-8, -21, 8, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(8, -21, 8, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -21);
+    ctx.lineTo(0, -21);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
-function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
+function drawBeeSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x: number, y: number, vx: number, vy: number, time: number, blink: boolean, rocket: boolean, facing: -1 | 1) {
+  ctx.save();
+  ctx.translate(x, y + Math.sin(time * .018) * 1.2);
+  ctx.rotate(Math.max(-.11, Math.min(.11, vx / 1800)) + Math.sin(time * .008) * .012);
+  ctx.scale(facing, 1);
+  if (blink && Math.floor(time / 90) % 2 === 0) ctx.globalAlpha = .34;
+
+  const wingBeat = Math.sin(time * .11);
+  const wingLift = .5 + wingBeat * .5;
+  ctx.save();
+  ctx.strokeStyle = `rgba(238,251,255,${.3 + wingLift * .28})`;
+  ctx.lineWidth = 3.2;
+  ctx.lineCap = "round";
+  for (let trail = 0; trail < 3; trail += 1) {
+    const trailY = 7 + trail * 10;
+    const trailLength = 14 + Math.abs(vx) * .035 + trail * 5;
+    ctx.globalAlpha = .22 - trail * .045;
+    ctx.beginPath();
+    ctx.moveTo(-36, trailY);
+    ctx.lineTo(-36 - trailLength, trailY + 4);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = "rgba(235,250,255,.74)";
+  ctx.strokeStyle = "rgba(76,132,154,.42)";
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.ellipse(-18, -13, 9 + wingLift * 3, 27, -1.02 - wingBeat * .34, 0, Math.PI * 2);
+  ctx.ellipse(8, -16, 8 + wingLift * 3, 25, .92 + wingBeat * .3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,.38)";
+  ctx.beginPath();
+  ctx.ellipse(-20, -17, 4, 14, -1.02 - wingBeat * .34, 0, Math.PI * 2);
+  ctx.ellipse(10, -19, 4, 13, .92 + wingBeat * .3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  if (rocket) {
+    const flame = 30 + Math.sin(time * .032) * 8;
+    const fire = ctx.createLinearGradient(0, 28, 0, 28 + flame);
+    fire.addColorStop(0, "rgba(255,238,106,.95)");
+    fire.addColorStop(.45, "rgba(255,144,32,.9)");
+    fire.addColorStop(1, "rgba(241,73,43,0)");
+    ctx.fillStyle = fire;
+    ctx.beginPath();
+    ctx.moveTo(-9, 25);
+    ctx.quadraticCurveTo(-6, 40, 0, 28 + flame);
+    ctx.quadraticCurveTo(7, 40, 10, 25);
+    ctx.fill();
+  }
+  const height = 78;
+  const width = height * (image.naturalWidth / image.naturalHeight);
+  ctx.shadowColor = "rgba(80,54,24,.22)";
+  ctx.shadowBlur = 7;
+  ctx.shadowOffsetY = 5;
+  ctx.drawImage(image, -width / 2, -height + 31, width, height);
+  ctx.restore();
+}
+
+function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionDetected }: {
   phase: Phase;
   controlMode: ControlMode;
   resetToken: number;
-  onStats: (honey: number, height: number, message: string) => void;
+  onStats: (honey: number, height: number, message: string, ammo: number) => void;
   onFail: (honey: number, height: number) => void;
+  onMotionDetected: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState>(firstState());
   const phaseRef = useRef(phase);
   const frameRef = useRef(0);
-  const orientationRef = useRef({ gamma: 0, baseline: 0, calibrated: false });
-  const pointerRef = useRef({ active: false, x: WIDTH / 2 });
+  const beeImageRef = useRef<HTMLImageElement | null>(null);
+  const bearImageRef = useRef<HTMLImageElement | null>(null);
+  const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+  const orientationRef = useRef({ tilt: 0, baseline: 0, calibrated: false, reported: false });
+  const pointerRef = useRef({ active: false, x: WIDTH / 2, startX: WIDTH / 2, startTime: 0, moved: false });
   const keysRef = useRef({ left: false, right: false });
 
-  useEffect(() => { phaseRef.current = phase; stateRef.current.lastTime = 0; }, [phase]);
-  useEffect(() => { stateRef.current = firstState(); generateWorld(stateRef.current, HEIGHT * 2); orientationRef.current.calibrated = false; }, [resetToken]);
+  useEffect(() => {
+    phaseRef.current = phase;
+    stateRef.current.lastTime = 0;
+    if (phase !== "playing") setBearDangerSound(false);
+  }, [phase]);
+  useEffect(() => {
+    stateRef.current = firstState();
+    generateWorld(stateRef.current, HEIGHT * 2);
+    orientationRef.current.calibrated = false;
+    orientationRef.current.reported = false;
+  }, [resetToken]);
+  useEffect(() => {
+    const beeImage = new Image();
+    const bearImage = new Image();
+    const backgroundImage = new Image();
+    beeImage.src = "/bee-character-flying-final.png";
+    bearImage.src = "/honey-thief-bear.png";
+    backgroundImage.src = "/game-background-long.png";
+    beeImage.onload = () => { beeImageRef.current = beeImage; };
+    bearImage.onload = () => { bearImageRef.current = bearImage; };
+    backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
+    return () => {
+      beeImageRef.current = null;
+      bearImageRef.current = null;
+      backgroundImageRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const orientation = (event: DeviceOrientationEvent) => {
-      if (typeof event.gamma !== "number") return;
+      if (typeof event.gamma !== "number" || typeof event.beta !== "number") return;
+      const angle = screen.orientation?.angle ?? (typeof window.orientation === "number" ? window.orientation : 0);
+      let tilt = event.gamma;
+      if (angle === 90) tilt = event.beta;
+      else if (angle === -90 || angle === 270) tilt = -event.beta;
+      else if (angle === 180) tilt = -event.gamma;
       const sensor = orientationRef.current;
-      sensor.gamma = event.gamma;
-      if (!sensor.calibrated) { sensor.baseline = event.gamma; sensor.calibrated = true; }
+      sensor.tilt = tilt;
+      if (!sensor.calibrated) { sensor.baseline = tilt; sensor.calibrated = true; }
+      if (!sensor.reported) {
+        sensor.reported = true;
+        onMotionDetected();
+      }
     };
     const down = (event: KeyboardEvent) => {
       if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") keysRef.current.left = true;
@@ -359,21 +1690,23 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
       if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") keysRef.current.right = false;
     };
     window.addEventListener("deviceorientation", orientation);
+    window.addEventListener("deviceorientationabsolute", orientation as EventListener);
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
       window.removeEventListener("deviceorientation", orientation);
+      window.removeEventListener("deviceorientationabsolute", orientation as EventListener);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, []);
+  }, [onMotionDetected]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const screenY = (worldY: number, cameraY: number) => FLOOR_Y - (worldY - cameraY);
+    const screenY = (worldY: number, cameraY: number) => FLOOR_Y - (worldY - cameraY) * VIEW_SCALE;
     const burst = (state: GameState, x: number, y: number, color: string, count = 10) => {
       for (let i = 0; i < count; i += 1) {
         const a = Math.random() * Math.PI * 2;
@@ -382,37 +1715,42 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
       }
     };
 
-    const drawBackground = (state: GameState, time: number) => {
-      const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
-      gradient.addColorStop(0, "#71c9ed");
-      gradient.addColorStop(.62, "#c9eee0");
-      gradient.addColorStop(1, "#fff0aa");
-      ctx.fillStyle = gradient;
+    const drawBackground = (state: GameState) => {
+      const backgroundImage = backgroundImageRef.current;
+      if (!backgroundImage) {
+        const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+        gradient.addColorStop(0, "#78cff1");
+        gradient.addColorStop(.55, "#c9f2df");
+        gradient.addColorStop(1, "#fff2ac");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+        return;
+      }
+
+      const tileHeight = WIDTH * (backgroundImage.naturalHeight / backgroundImage.naturalWidth);
+      const tileWorldHeight = tileHeight / VIEW_SCALE;
+      const firstTile = Math.floor((state.cameraY - 180) / tileWorldHeight) - 1;
+      for (let index = firstTile; index < firstTile + 5; index += 1) {
+        const worldBottom = index * tileWorldHeight;
+        const worldTop = worldBottom + tileWorldHeight;
+        const topY = FLOOR_Y - (worldTop - state.cameraY) * VIEW_SCALE;
+        ctx.save();
+        if (Math.abs(index) % 2 === 1) {
+          ctx.translate(0, topY + tileHeight);
+          ctx.scale(1, -1);
+          ctx.drawImage(backgroundImage, 0, 0, WIDTH, tileHeight);
+        } else {
+          ctx.drawImage(backgroundImage, 0, topY, WIDTH, tileHeight);
+        }
+        ctx.restore();
+      }
+      ctx.fillStyle = "rgba(255,255,255,.06)";
       ctx.fillRect(0, 0, WIDTH, HEIGHT);
-      const offset = (state.cameraY * .42) % 170;
-      ctx.fillStyle = "rgba(255,255,255,.58)";
-      for (let i = -1; i < 6; i += 1) {
-        const y = i * 170 + offset;
-        const x = 32 + ((i * 119) % 390);
-        ctx.beginPath();
-        ctx.ellipse(x, y, 38, 15, 0, 0, Math.PI * 2);
-        ctx.ellipse(x + 34, y + 2, 28, 12, 0, 0, Math.PI * 2);
-        ctx.ellipse(x + 15, y - 10, 22, 16, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.fillStyle = "rgba(255,247,190,.45)";
-      for (let i = 0; i < 12; i += 1) {
-        const x = 24 + i * 46;
-        const y = (time * .018 + i * 81 + state.cameraY * .7) % HEIGHT;
-        ctx.beginPath();
-        ctx.arc(x, y, 2 + i % 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
     };
 
     const draw = (state: GameState, time: number) => {
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
-      drawBackground(state, time);
+      drawBackground(state);
       for (const p of state.platforms) {
         const sy = screenY(p.y, state.cameraY);
         if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) drawPlatform(ctx, p, sy, time);
@@ -421,9 +1759,18 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
         if (item.used) continue;
         const sy = screenY(item.y, state.cameraY);
         if (sy < -70 || sy > HEIGHT + 70) continue;
-        if (item.kind === "bear") drawBear(ctx, item.x, sy);
-        else if (item.kind === "web") drawWeb(ctx, item.x, sy);
-        else drawRocket(ctx, item.x, sy, time);
+        if (item.kind === "bear") {
+          const bearImage = bearImageRef.current;
+          if (bearImage) drawBearSprite(ctx, bearImage, item.x, sy, time);
+          else drawBear(ctx, item.x, sy);
+        }
+        else if (item.kind === "web") drawWeb(ctx, item.x, sy, time);
+        else if (item.kind === "blackHole") drawBlackHole(ctx, item.x, sy, time);
+        else if (item.kind === "hornet") drawHornet(ctx, item.x, sy, time);
+        else if (item.kind === "bat") drawBat(ctx, item.x, sy, time);
+        else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time);
+        else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time);
+        else drawHoneyJar(ctx, item.x, sy, time, item.value);
       }
       for (const p of state.particles) {
         ctx.globalAlpha = Math.max(0, p.life);
@@ -433,110 +1780,266 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-      drawBee(ctx, state.beeX, screenY(state.beeY, state.cameraY), state.vx, time, state.invincible > 0, state.rocketTimer > 0);
+      for (const shot of state.shots) {
+        const sy = screenY(shot.y, state.cameraY);
+        const glow = ctx.createRadialGradient(shot.x, sy, 1, shot.x, sy, 14);
+        glow.addColorStop(0, "#fffbe0");
+        glow.addColorStop(.35, "#ffd12f");
+        glow.addColorStop(1, "rgba(255,175,18,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(shot.x, sy, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffb316";
+        ctx.beginPath();
+        ctx.ellipse(shot.x, sy, 5, 9, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const beeImage = beeImageRef.current;
+      const beeY = screenY(state.beeY, state.cameraY);
+      if (beeImage) drawBeeSprite(ctx, beeImage, state.beeX, beeY, state.vx, state.vy, time, state.invincible > 0, state.rocketTimer > 0, state.facing);
+      else drawBee(ctx, state.beeX, beeY, state.vx, state.vy, time, state.invincible > 0, state.rocketTimer > 0, state.facing);
+      if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true);
     };
 
     const update = (state: GameState, dt: number) => {
       state.invincible = Math.max(0, state.invincible - dt);
-      state.webTimer = Math.max(0, state.webTimer - dt);
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
+      state.copterTimer = Math.max(0, state.copterTimer - dt);
       state.messageTimer = Math.max(0, state.messageTimer - dt);
+      state.tutorialTimer = Math.max(0, state.tutorialTimer - dt);
       if (state.messageTimer <= 0) state.message = "";
+
+      const tutorialText: Partial<Record<TutorialKey, string>> = {
+        broken: "裂开的花：踩上去会碎，不能弹跳！",
+        spring: "弹簧花：踩中银色弹簧，跃升约八层",
+        moving: "蓝色飞行花：会左右移动",
+        cloud: "漂浮云阶：跟随云朵移动再起跳",
+        fading: "透明花：只能踩一次",
+        honeyJar: "蜂蜜罐：采蜜值 +50",
+        bear: "偷蜜熊：踩头加分，侧撞结束",
+        web: "蜘蛛网：碰到就会被吸住",
+        blackHole: "黑洞：会吸引小蜜蜂，碰到就会失败",
+        hornet: "黑蜂怪：可以踩头或用花粉弹击退",
+        bat: "蝙蝠怪：横向巡逻，可以踩头或射击",
+        rocket: "花蜜火箭：超长飞跃约二十四层",
+        bambooCopter: "竹蜻蜓：持续旋转升空约十二层",
+      };
+      const teach = (kind: TutorialKey) => {
+        if (state.tutorialTimer > 0 || state.taught[kind] || !tutorialText[kind]) return;
+        state.taught[kind] = true;
+        state.message = tutorialText[kind] ?? "";
+        state.messageTimer = 3;
+        state.tutorialTimer = 1.15;
+      };
+      for (const p of state.platforms) {
+        const sy = screenY(p.y, state.cameraY);
+        if (sy > 135 && sy < HEIGHT - 105) teach(p.kind);
+      }
+      for (const item of state.airItems) {
+        const sy = screenY(item.y, state.cameraY);
+        if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
+          item.audioPlayed = true;
+        } else if (!item.used && !item.audioPlayed && item.kind === "web" && sy > -75 && sy < 85) {
+          item.audioPlayed = true;
+          playGameSound("webWind");
+        } else if (!item.used && !item.audioPlayed && item.kind === "blackHole" && sy > -100 && sy < 100) {
+          item.audioPlayed = true;
+          playGameSound("blackHole");
+        }
+        if (!item.used && sy > 150 && sy < HEIGHT - 120) teach(item.kind);
+      }
+      const bearDangerActive = state.airItems.some((item) => {
+        if (item.used || item.kind !== "bear") return false;
+        const sy = screenY(item.y, state.cameraY);
+        const notSafelyPassed = item.y > state.beeY - 90;
+        return sy > -215 && sy < HEIGHT + 70 && notSafelyPassed;
+      });
+      setBearDangerSound(bearDangerActive);
+      const now = state.lastTime / 1000;
+      for (const p of state.platforms) {
+        if ((p.kind === "moving" || p.kind === "cloud") && p.baseX !== undefined) {
+          p.x = Math.max(50, Math.min(WIDTH - 50, p.baseX + Math.sin(now * (p.speed ?? 1) + (p.phase ?? 0)) * (p.range ?? 45)));
+        }
+      }
+      for (const item of state.airItems) {
+        if ((item.kind === "bear" || item.kind === "hornet" || item.kind === "bat") && item.baseX !== undefined) {
+          item.x = Math.max(42, Math.min(WIDTH - 42, item.baseX + Math.sin(now * (item.speed ?? 1) + (item.phase ?? 0)) * (item.range ?? 38)));
+        }
+      }
 
       let input = 0;
       if (keysRef.current.left) input -= 1;
       if (keysRef.current.right) input += 1;
       if (controlMode === "motion" && orientationRef.current.calibrated) {
-        const raw = orientationRef.current.gamma - orientationRef.current.baseline;
-        input = Math.abs(raw) < 4 ? 0 : Math.max(-1, Math.min(1, (raw - Math.sign(raw) * 4) / 18));
-      } else if (pointerRef.current.active) input = Math.max(-1, Math.min(1, (pointerRef.current.x - state.beeX) / 62));
-      const horizontalLimit = state.webTimer > 0 ? 105 : 300;
+        const raw = orientationRef.current.tilt - orientationRef.current.baseline;
+        input = Math.abs(raw) < 2.2 ? 0 : Math.max(-1, Math.min(1, (raw - Math.sign(raw) * 2.2) / 15));
+      } else if (pointerRef.current.active) input = Math.max(-1, Math.min(1, (pointerRef.current.x - state.beeX) / 58));
+      const horizontalLimit = 345;
       const targetVx = input * horizontalLimit;
-      state.vx += (targetVx - state.vx) * Math.min(1, dt * (state.webTimer > 0 ? 3 : 8));
-      if (input === 0) state.vx *= Math.pow(.88, dt * 60);
+      state.vx += (targetVx - state.vx) * Math.min(1, dt * 13);
+      if (input === 0) state.vx *= Math.pow(.9, dt * 60);
+      if (state.vx > 32) state.facing = 1;
+      else if (state.vx < -32) state.facing = -1;
+
+      for (const item of state.airItems) {
+        if (item.used || item.kind !== "blackHole") continue;
+        const dx = item.x - state.beeX;
+        const dy = item.y - state.beeY;
+        const distance = Math.max(28, Math.hypot(dx, dy));
+        if (distance < 150) {
+          const pull = (1 - distance / 150) * 260;
+          state.vx += dx / distance * pull * dt;
+          state.vy += dy / distance * pull * .45 * dt;
+        }
+      }
 
       const oldFoot = state.beeY - 27;
       state.beeX += state.vx * dt;
       if (state.beeX < -25) state.beeX = WIDTH + 25;
       if (state.beeX > WIDTH + 25) state.beeX = -25;
       if (state.rocketTimer > 0) state.vy = ROCKET_SPEED;
+      else if (state.copterTimer > 0) state.vy = COPTER_SPEED;
       else state.vy -= GRAVITY * dt;
       state.beeY += state.vy * dt;
       const newFoot = state.beeY - 27;
 
-      if (state.rocketTimer <= 0 && state.vy < 0) {
+      if (state.rocketTimer <= 0 && state.copterTimer <= 0 && state.vy < 0) {
         const landing = state.platforms.find((p) => {
           if (p.breaking >= .38) return false;
-          const half = p.width / 2 + 13;
+          const half = p.width / 2 + 11;
           return oldFoot >= p.y && newFoot <= p.y && state.beeX >= p.x - half && state.beeX <= p.x + half;
         });
         if (landing) {
-          state.beeY = landing.y + 27;
-          state.vy = landing.kind === "spring" ? SPRING_SPEED : JUMP_SPEED;
           const sy = screenY(landing.y, state.cameraY);
           if (landing.kind === "broken") {
             landing.breaking = .01;
-            state.message = "碎花！马上离开";
+            state.message = "裂花碎了！继续下落";
             state.messageTimer = .9;
+            playGameSound("break");
             burst(state, landing.x, sy, "#c7aaa0", 13);
-          } else if (!landing.used) {
+          } else {
+            state.beeY = landing.y + 27;
+            state.vy = landing.kind === "spring" ? SPRING_SPEED : JUMP_SPEED;
+            if (landing.kind === "fading") landing.breaking = .01;
+            if (!landing.used && landing.kind === "spring") {
+              state.message = "弹簧启动 · 跃升约八层";
+              state.messageTimer = .85;
+              playGameSound("spring");
+              burst(state, landing.x, sy, "#fff0a0", 15);
+            } else playGameSound("bounce");
             landing.used = true;
-            const gain = landing.kind === "gold" ? 35 : landing.kind === "spring" ? 20 : 10;
-            state.honey += gain;
-            state.message = landing.kind === "spring" ? "弹簧花！超级跳跃" : landing.kind === "gold" ? "金色花蜜 +35" : "采蜜 +10";
-            state.messageTimer = .75;
-            burst(state, landing.x, sy, landing.kind === "gold" ? "#ffe052" : "#ff8db3", 11);
           }
         }
       }
 
       const beeScreenY = screenY(state.beeY, state.cameraY);
-      for (const item of state.airItems) {
-        if (item.used || state.invincible > 0 && item.kind !== "rocket") continue;
-        const sy = screenY(item.y, state.cameraY);
-        if (Math.hypot(item.x - state.beeX, sy - beeScreenY) > (item.kind === "rocket" ? 43 : 48)) continue;
-        if (item.kind === "rocket") {
+      for (const shot of state.shots) {
+        shot.y += shot.vy * dt;
+        shot.life -= dt;
+        for (const item of state.airItems) {
+          const isShootableMonster = item.kind === "bear" || item.kind === "hornet" || item.kind === "bat";
+          if (item.used || !isShootableMonster || Math.hypot(item.x - shot.x, item.y - shot.y) > 36) continue;
           item.used = true;
-          state.rocketTimer = 1.35;
+          shot.life = 0;
+          state.bonusHoney += 100;
+          state.message = `花粉弹击退${item.kind === "bear" ? "偷蜜熊" : item.kind === "hornet" ? "黑蜂怪" : "蝙蝠怪"} +100`;
+          state.messageTimer = 1;
+          playGameSound("hit");
+          burst(state, item.x, screenY(item.y, state.cameraY), "#ffd12f", 20);
+          break;
+        }
+      }
+      state.shots = state.shots.filter((shot) => shot.life > 0 && shot.y < state.cameraY + HEIGHT * 1.5);
+      for (const item of state.airItems) {
+        if (item.used) continue;
+        const sy = screenY(item.y, state.cameraY);
+        const hitRadius = item.kind === "honeyJar" ? 37
+          : item.kind === "rocket" || item.kind === "bambooCopter" ? 43
+          : item.kind === "blackHole" ? 31
+          : item.kind === "bear" ? 38
+          : 35;
+        if (Math.hypot(item.x - state.beeX, sy - beeScreenY) > hitRadius) continue;
+        if (item.kind === "honeyJar") {
+          item.used = true;
+          const value = item.value ?? 20;
+          state.bonusHoney += value;
+          state.ammoProgress += 1;
+          if (state.ammoProgress >= 3) {
+            state.ammoProgress -= 3;
+            state.ammo = Math.min(2, state.ammo + 1);
+          }
+          state.message = `蜂蜜罐 +${value}`;
+          state.messageTimer = .85;
+          playGameSound("honey");
+          burst(state, item.x, sy, "#ffd34d", 18);
+        } else if (item.kind === "rocket") {
+          item.used = true;
+          state.rocketTimer = ROCKET_FLIGHT_TIME;
+          state.copterTimer = 0;
           state.vy = ROCKET_SPEED;
-          state.honey += 60;
-          state.message = "火箭加速！+60";
+          state.message = "火箭点火 · 超长飞跃！";
           state.messageTimer = 1.2;
+          playGameSound("rocket");
           burst(state, item.x, sy, "#ffb62b", 18);
-        } else if (item.kind === "bear") {
-          const loss = Math.min(state.honey, Math.max(20, Math.round(state.honey * .3)));
-          state.honey -= loss;
-          state.invincible = 1.25;
-          state.vx = state.beeX < item.x ? -260 : 260;
-          state.message = `偷蜜熊 -${loss}`;
+        } else if (item.kind === "bambooCopter") {
+          item.used = true;
+          state.copterTimer = COPTER_FLIGHT_TIME;
+          state.vy = COPTER_SPEED;
+          state.message = "竹蜻蜓启动 · 飞跃约十二层";
           state.messageTimer = 1.1;
-          burst(state, item.x, sy, "#ffbd23", 15);
-        } else {
-          state.webTimer = 1.4;
-          state.invincible = .8;
-          state.vy *= .52;
-          state.message = "蜘蛛网减速！";
-          state.messageTimer = 1.1;
+          playGameSound("copter");
+          burst(state, item.x, sy, "#8dd477", 18);
+        } else if (item.kind === "bear" || item.kind === "hornet" || item.kind === "bat") {
+          const monsterName = item.kind === "bear" ? "偷蜜熊" : item.kind === "hornet" ? "黑蜂怪" : "蝙蝠怪";
+          const stomped = state.vy < 0 && state.beeY > item.y + 18;
+          if (stomped) {
+            item.used = true;
+            state.bonusHoney += 100;
+            state.vy = JUMP_SPEED * .9;
+            state.message = `踩中${monsterName} +100`;
+            state.messageTimer = 1.1;
+            playGameSound("hit");
+            burst(state, item.x, sy, "#ffbd23", 20);
+          } else {
+            state.ended = true;
+            state.message = `撞到${monsterName}！`;
+            state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
+            playGameSound("fail");
+            onFail(state.honey, heightMeters(state.highest));
+            break;
+          }
+        } else if (item.kind === "blackHole") {
+          state.ended = true;
+          state.message = "被黑洞吸入了！";
+          state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
+          playGameSound("fail");
+          onFail(state.honey, heightMeters(state.highest));
+          break;
+        } else if (item.kind === "web") {
+          state.ended = true;
+          state.message = "被蜘蛛网吸住了！";
+          state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
+          playGameSound("fail");
+          onFail(state.honey, heightMeters(state.highest));
+          break;
         }
       }
 
       for (const p of state.platforms) if (p.breaking > 0) p.breaking += dt;
       state.highest = Math.max(state.highest, state.beeY);
-      const newHeightReward = Math.floor(state.highest / 25);
-      if (newHeightReward > state.heightRewarded) {
-        state.honey += newHeightReward - state.heightRewarded;
-        state.heightRewarded = newHeightReward;
-      }
+      state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
       const targetCamera = Math.max(0, state.highest - 300);
       state.cameraY += (targetCamera - state.cameraY) * Math.min(1, dt * 4.4);
-      generateWorld(state, state.cameraY + HEIGHT * 1.8);
+      generateWorld(state, state.cameraY + HEIGHT * 2.5);
       state.platforms = state.platforms.filter((p) => p.y > state.cameraY - 180);
       state.airItems = state.airItems.filter((item) => item.y > state.cameraY - 180);
       state.particles = state.particles.map((p) => ({ ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + 70 * dt, life: p.life - dt })).filter((p) => p.life > 0);
-      onStats(state.honey, state.highest, state.message);
+      onStats(state.honey, heightMeters(state.highest), state.message, state.ammo);
       if (!state.ended && state.beeY < state.cameraY - 95) {
         state.ended = true;
-        onFail(state.honey, state.highest);
+        playGameSound("fail");
+        onFail(state.honey, heightMeters(state.highest));
       }
     };
 
@@ -550,7 +2053,10 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
       frameRef.current = requestAnimationFrame(loop);
     };
     frameRef.current = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(frameRef.current);
+    return () => {
+      cancelAnimationFrame(frameRef.current);
+      setBearDangerSound(false);
+    };
   }, [controlMode, onFail, onStats, resetToken]);
 
   const setPointer = (clientX: number) => {
@@ -559,51 +2065,123 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail }: {
     const rect = canvas.getBoundingClientRect();
     pointerRef.current.x = (clientX - rect.left) / rect.width * WIDTH;
   };
-  return <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="game-canvas" aria-label="无限向上的小蜜蜂花台跳跃游戏" onPointerDown={(event) => { pointerRef.current.active = true; setPointer(event.clientX); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => pointerRef.current.active && setPointer(event.clientX)} onPointerUp={() => { pointerRef.current.active = false; }} onPointerCancel={() => { pointerRef.current.active = false; }} />;
+  const firePollen = () => {
+    const state = stateRef.current;
+    if (phaseRef.current !== "playing" || state.ammo <= 0) {
+      if (phaseRef.current === "playing") {
+        state.message = "花粉弹不足 · 收集3罐蜂蜜补充";
+        state.messageTimer = .9;
+        playGameSound("empty");
+      }
+      return;
+    }
+    state.ammo -= 1;
+    state.shots.push({ x: state.beeX, y: state.beeY + 30, vy: 650, life: 1.25 });
+    state.message = "花粉弹发射！";
+    state.messageTimer = .45;
+    playGameSound("shoot");
+  };
+  return <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="game-canvas" aria-label="无限向上的小蜜蜂花台跳跃游戏" onPointerDown={(event) => {
+    setPointer(event.clientX);
+    pointerRef.current = { ...pointerRef.current, active: true, startX: event.clientX, startTime: performance.now(), moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }} onPointerMove={(event) => {
+    if (!pointerRef.current.active) return;
+    if (Math.abs(event.clientX - pointerRef.current.startX) > 12) pointerRef.current.moved = true;
+    setPointer(event.clientX);
+  }} onPointerUp={() => {
+    const pointer = pointerRef.current;
+    if (!pointer.moved && performance.now() - pointer.startTime < 240) firePollen();
+    pointer.active = false;
+  }} onPointerCancel={() => { pointerRef.current.active = false; }} />;
 }
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
-  const [stats, setStats] = useState({ honey: 0, height: 0, message: "" });
+  const [stats, setStats] = useState({ honey: 0, height: 0, message: "", ammo: 1 });
   const [result, setResult] = useState({ honey: 0, height: 0 });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
+  const [motionNotice, setMotionNotice] = useState("");
   const finishLock = useRef(false);
+  const motionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setBest(Number(localStorage.getItem("honeybee-best") || 0)), 500);
-    return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => setBest(Number(localStorage.getItem("honeybee-harvest-v3") || 0)), 500);
+    return () => {
+      window.clearTimeout(timer);
+      if (motionTimerRef.current) window.clearTimeout(motionTimerRef.current);
+    };
   }, []);
 
-  const onStats = useCallback((honey: number, height: number, message: string) => {
-    setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.message === message ? old : { honey, height, message });
+  useEffect(() => {
+    setBackgroundMusic(phase === "playing");
+  }, [phase]);
+
+  useEffect(() => () => setBackgroundMusic(false), []);
+
+  const onMotionDetected = useCallback(() => {
+    if (motionTimerRef.current) window.clearTimeout(motionTimerRef.current);
+    motionTimerRef.current = null;
+    setMotionUnavailable(false);
+    setMotionNotice("体感已连接 · 左右晃动手机");
+  }, []);
+
+  const onStats = useCallback((honey: number, height: number, message: string, ammo: number) => {
+    setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.message === message && old.ammo === ammo ? old : { honey, height, message, ammo });
   }, []);
   const onFail = useCallback((honey: number, height: number) => {
     if (finishLock.current) return;
     finishLock.current = true;
     const nextBest = Math.max(best, honey);
     setBest(nextBest);
-    localStorage.setItem("honeybee-best", String(nextBest));
+    localStorage.setItem("honeybee-harvest-v3", String(nextBest));
     setResult({ honey, height });
     setPhase("failed");
   }, [best]);
   const startGame = () => {
+    setBackgroundMusic(true);
+    playGameSound("start");
     finishLock.current = false;
-    setStats({ honey: 0, height: 0, message: "" });
+    setStats({ honey: 0, height: 0, message: "", ammo: 1 });
     setResetToken((value) => value + 1);
     setPhase("playing");
   };
   const requestMotion = async () => {
+    getGameAudioContext();
+    setMotionUnavailable(false);
+    setMotionNotice("");
     try {
-      const MotionEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & { requestPermission?: () => Promise<"granted" | "denied"> };
-      if (typeof MotionEvent.requestPermission === "function" && await MotionEvent.requestPermission() !== "granted") throw new Error("denied");
+      if (!window.isSecureContext) throw new Error("secure-context");
+      if (!("DeviceOrientationEvent" in window)) throw new Error("unsupported");
+      type PermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
+      const orientationEvent = window.DeviceOrientationEvent as typeof DeviceOrientationEvent & PermissionEvent;
+      const motionEvent = window.DeviceMotionEvent as typeof DeviceMotionEvent & PermissionEvent;
+      const requests: Promise<"granted" | "denied">[] = [];
+      if (typeof orientationEvent.requestPermission === "function") requests.push(orientationEvent.requestPermission());
+      if (typeof motionEvent?.requestPermission === "function") requests.push(motionEvent.requestPermission());
+      const permissions = await Promise.all(requests);
+      if (permissions.some((permission) => permission !== "granted")) throw new Error("denied");
       setControlMode("motion");
+      setMotionNotice("正在连接体感…");
       startGame();
-    } catch { setMotionUnavailable(true); setControlMode("touch"); }
+      motionTimerRef.current = window.setTimeout(() => {
+        setMotionUnavailable(true);
+        setMotionNotice("没有收到体感数据，请确认浏览器已允许动作与方向访问");
+      }, 2600);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown";
+      setMotionUnavailable(true);
+      setMotionNotice(reason === "secure-context"
+        ? "体感需要 HTTPS 安全链接，当前局域网 HTTP 地址无法读取手机传感器"
+        : reason === "denied"
+          ? "体感权限被拒绝，请在浏览器设置中允许动作与方向访问"
+          : "当前浏览器不支持体感，请更换 Safari 或 Chrome");
+    }
   };
-  const playTouch = () => { setControlMode("touch"); startGame(); };
+  const playTouch = () => { setMotionUnavailable(false); setMotionNotice(""); setControlMode("touch"); startGame(); };
 
   return (
     <main className="page-shell">
@@ -611,29 +2189,77 @@ export default function Home() {
         <div className="brand-mark"><span>蜜</span></div>
         <p className="eyebrow">ENDLESS HONEY JUMP</p>
         <h1>小蜜蜂<br /><em>无限采蜜</em></h1>
-        <p className="brand-copy">没有终点，只有更高。踩住密集花台不断向上，借助弹簧和火箭刷新你的最高采蜜值。</p>
+        <p className="brand-copy">自动弹跳、左右操控。花朵会越来越窄，避开裂花、偷蜜熊与蜘蛛网，冲击更高采蜜值。</p>
+        <div className="score-rule"><span>🏆</span><div><strong>采蜜值就是唯一成绩</strong><small>向上攀升和蜂蜜罐都会加分</small></div></div>
         <div className="control-tip"><div className="phone-tilt" aria-hidden="true"><span>↔</span></div><div><strong>只控制左右</strong><small>跳跃与上升完全自动</small></div></div>
-        <div className="legend"><span><i className="dot flower-dot" />花台与弹簧</span><span><i className="dot bear-dot" />空中障碍</span></div>
+        <div className="legend"><span><i className="dot flower-dot" />粉花安全</span><span><i className="dot bear-dot" />红圈危险</span></div>
       </section>
 
       <section className="game-phone">
-        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} onStats={onStats} onFail={onFail} />
+        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
         <header className="game-hud" aria-live="polite">
-          <div className="hud-pill"><span className="honey-drop" /><b>{stats.honey}</b></div>
-          <div className="best-score">最高 {Math.max(best, stats.honey)}</div>
-          <div className="hud-pill flower-pill"><span>↥</span><b>{Math.floor(stats.height)}m</b></div>
+          <div className="hud-pill score-pill"><span className="honey-drop" /><span><small>采蜜值</small><b>{stats.honey}</b></span></div>
+          <div className="best-score"><span className="record-crown">♛</span><span><small>最高纪录</small><b>{Math.max(best, stats.honey)}</b></span></div>
         </header>
+        {phase === "playing" && <div className="power-hud"><div className="ammo-chip" aria-label={`剩余${stats.ammo}发花粉弹`}><span>花粉弹 ✦</span>{Array.from({ length: 2 }, (_, i) => <i className={i < stats.ammo ? "loaded" : ""} key={i} />)}</div></div>}
         {stats.message && phase === "playing" && <div className="game-message">{stats.message}</div>}
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
-          <div className="mini-logo">小蜜蜂 · 无限采蜜</div>
-          <div className="hero-bee" aria-hidden="true"><span className="wing left" /><span className="wing right" /><b>●</b></div>
-          <div className="intro-card"><p className="intro-kicker">无限高度 · 挑战最高分</p><h2>踩花向上跳<br />弹簧火箭来助力</h2><div className="tilt-demo" aria-hidden="true"><span>🌸</span><b>↔</b><span>🚀</span></div><button className="primary-button" onClick={requestMotion}>开启体感 · 起跳</button><button className="text-button" onClick={playTouch}>触屏 / 电脑试玩</button>{motionUnavailable && <p className="permission-note">当前设备未开启体感，请使用触屏模式。</p>}</div>
+          <div className="cover-frame">
+            <div className="cover-plaque"><i />蜂蜜花园采蜜令<i /></div>
+            <div className="cover-hero" aria-hidden="true">
+              <span className="cover-halo" />
+              <span className="cover-flower flower-one" />
+              <span className="cover-flower flower-two" />
+              <span className="cover-flower flower-three" />
+              <div className="cover-bee" />
+            </div>
+            <div className="cover-title">
+              <small>向上飞 · 带蜂蜜回家</small>
+              <h2>小蜜蜂<br /><em>采蜜世界</em></h2>
+              <p>晃动手机控制方向，踩着花朵不断向上飞跃。</p>
+            </div>
+            <div className="cover-rule">
+              <span className="cover-rule-icon">🍯</span>
+              <span><b>采蜜值就是最终成绩</b><small>飞得越高，发现的蜂蜜越多</small></span>
+            </div>
+            <div className="cover-actions">
+              <button className="cover-primary" onClick={requestMotion}>开始体感采蜜</button>
+              <button className="cover-secondary" onClick={playTouch}>使用触屏试玩</button>
+            </div>
+            <p className="cover-footnote">左右晃动控制方向 · 小蜜蜂自动飞跃</p>
+            {motionNotice && <p className={`permission-note${motionUnavailable ? " is-error" : ""}`}>{motionNotice}</p>}
+          </div>
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
-        {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌸</span><h2>暂停采蜜</h2><p>准备好再继续挑战高度。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续跳跃</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
-        {phase === "failed" && <div className="game-overlay result-overlay"><div className="modal-card result-card"><span className="modal-icon">🍯</span><p className="intro-kicker">本次采蜜结束</p><h2>{result.honey >= best ? "新的最高纪录！" : "再向上挑战"}</h2><div className="score-number"><span className="honey-drop large" />{result.honey}</div><div className="result-grid"><div><small>最高高度</small><strong>{Math.floor(result.height)}m</strong></div><div><small>最高采蜜</small><strong>{best}</strong></div></div><button className="primary-button" onClick={startGame}>重新挑战</button><button className="text-button" onClick={() => setPhase("menu")}>返回花园</button></div></div>}
-        {phase === "playing" && controlMode === "touch" && <div className="touch-hint">按住画面左右移动</div>}
+        {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌼</span><p className="intro-kicker">休息一下</p><h2>采蜜暂停</h2><p>当前采蜜值已为你保留。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
+        {phase === "failed" && <div className="game-overlay result-overlay">
+          <div className="result-sheet">
+            <div className="result-emblem">
+              <div className="result-bee" />
+              <span>{result.honey >= best ? "★" : "🍯"}</span>
+            </div>
+            <div className="result-plaque">本次采蜜飞行记录</div>
+            <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
+            <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
+            <div className="result-main-score">
+              <small>本次采蜜值</small>
+              <strong><span className="honey-drop large" />{result.honey}</strong>
+            </div>
+            <div className="result-stats">
+              <div><small>最高纪录</small><strong>{best}</strong></div>
+              <div><small>飞行高度</small><strong>{Math.floor(result.height)}<i>m</i></strong></div>
+            </div>
+            <div className="result-ranking"><i />采蜜值越高，花园排名越靠前<i /></div>
+            <div className="result-actions">
+              <button className="result-secondary" onClick={() => setPhase("menu")}>返回花园</button>
+              <button className="result-primary" onClick={startGame}>再飞一次</button>
+            </div>
+          </div>
+        </div>}
+        {phase === "playing" && controlMode === "touch" && <div className="touch-hint">按住拖动控制左右 · 轻点发射花粉弹</div>}
+        {phase === "playing" && controlMode === "motion" && <div className="touch-hint">晃动控制左右 · 轻点发射花粉弹</div>}
+        {phase === "playing" && controlMode === "motion" && motionNotice && <div className={`motion-status${motionUnavailable ? " is-error" : ""}`}><span />{motionNotice}</div>}
       </section>
     </main>
   );
