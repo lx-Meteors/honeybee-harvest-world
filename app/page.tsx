@@ -2021,12 +2021,19 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const purpleMonsterImage = new Image();
     const blueMonsterImage = new Image();
     const backgroundImage = new Image();
-    beeImage.src = "/bee-character-flying-final.png";
+    const markBeeReady = () => {
+      if (beeImage.naturalWidth > 0) beeImageRef.current = beeImage;
+    };
+    beeImage.decoding = "async";
+    beeImage.fetchPriority = "high";
+    beeImage.onload = markBeeReady;
+    beeImage.src = "/bee-character-flying-final-v2.png?v=20260731";
     redMonsterImage.src = "/monster-red-fuzz.png?v=20260730b";
     purpleMonsterImage.src = "/monster-purple-jelly.png?v=20260730b";
     blueMonsterImage.src = "/monster-blue-cyclops.png?v=20260730b";
     backgroundImage.src = "/game-background-long.png";
-    beeImage.onload = () => { beeImageRef.current = beeImage; };
+    if (beeImage.complete) markBeeReady();
+    void beeImage.decode().then(markBeeReady).catch(() => undefined);
     redMonsterImage.onload = () => { redMonsterImageRef.current = redMonsterImage; };
     purpleMonsterImage.onload = () => { purpleMonsterImageRef.current = purpleMonsterImage; };
     blueMonsterImage.onload = () => { blueMonsterImageRef.current = blueMonsterImage; };
@@ -2181,7 +2188,16 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       const beeImage = beeImageRef.current;
       const beeY = screenY(state.beeY, state.cameraY);
       if (beeImage) drawBeeSprite(ctx, beeImage, state.beeX, beeY, state.vx, state.vy, time, state.invincible > 0, state.rocketTimer > 0, state.facing);
-      else drawBee(ctx, state.beeX, beeY, state.vx, state.vy, time, state.invincible > 0, state.rocketTimer > 0, state.facing);
+      else {
+        // Do not flash the retired code-drawn bee while the real sprite is decoding.
+        ctx.save();
+        ctx.globalAlpha = 0.18 + Math.sin(time * 7) * 0.05;
+        ctx.fillStyle = "#ffd84a";
+        ctx.beginPath();
+        ctx.ellipse(state.beeX, beeY, 22, 18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
       if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true);
     };
 

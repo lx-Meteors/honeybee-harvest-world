@@ -219,7 +219,7 @@ button { font: inherit; }
   width: 174px;
   height: 178px;
   transform: translateX(-50%) rotate(-2deg);
-  background: url('/bee-character-flying-final.png') center / contain no-repeat;
+  background: url('/bee-character-flying-final-v2.png?v=20260731') center / contain no-repeat;
   filter: drop-shadow(0 14px 9px rgba(94,57,17,.25));
   animation: cover-flight 2.1s ease-in-out infinite;
 }
@@ -463,7 +463,7 @@ button { font: inherit; }
 .result-bee {
   position: absolute;
   inset: 7px;
-  background: url('/bee-character-flying-final.png') center / contain no-repeat;
+  background: url('/bee-character-flying-final-v2.png?v=20260731') center / contain no-repeat;
   filter: drop-shadow(0 5px 3px rgba(70,41,15,.2));
 }
 .result-emblem > span {
