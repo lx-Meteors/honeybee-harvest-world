@@ -77,9 +77,9 @@ type GameState = {
 const WIDTH = 540;
 const HEIGHT = 720;
 const FLOOR_Y = HEIGHT - 74;
-const GRAVITY = 980;
-const JUMP_SPEED = 760;
-const SPRING_SPEED = 1140;
+const GRAVITY = 1070;
+const JUMP_SPEED = 795;
+const SPRING_SPEED = 1190;
 const ROCKET_SPEED = 960;
 const COPTER_SPEED = 860;
 const HEIGHT_SCALE = 16;
@@ -96,7 +96,10 @@ const SFX_VOLUME = .66;
 
 let sharedAudioContext: AudioContext | null = null;
 let activeBearDangerLoop: HTMLAudioElement | null = null;
+let bearSynthTimer: number | null = null;
 let backgroundMusic: HTMLAudioElement | null = null;
+let synthMusicTimer: number | null = null;
+let synthMusicStep = 0;
 const audioPools = new Map<SoundKind, HTMLAudioElement[]>();
 
 const SOUND_FILES: Partial<Record<SoundKind, string>> = {
@@ -132,6 +135,7 @@ function playAudioFile(kind: SoundKind) {
   if (typeof window === "undefined") return false;
   const source = SOUND_FILES[kind];
   if (!source) return false;
+  if (source.endsWith(".ogg") && !new Audio().canPlayType('audio/ogg; codecs="vorbis"')) return false;
   let pool = audioPools.get(kind);
   if (!pool) {
     pool = Array.from({ length: kind === "bounce" ? 4 : 2 }, () => {
@@ -149,7 +153,7 @@ function playAudioFile(kind: SoundKind) {
     ? .94 + Math.random() * .1
     : kind === "spring" ? 1.02
       : 1;
-  void audio.play().catch(() => undefined);
+  void audio.play().catch(() => playSynthSound(kind));
   return true;
 }
 
@@ -163,8 +167,7 @@ function getGameAudioContext() {
   return sharedAudioContext;
 }
 
-function playGameSound(kind: SoundKind) {
-  if (playAudioFile(kind)) return;
+function playSynthSound(kind: SoundKind) {
   const audio = getGameAudioContext();
   if (!audio) return;
   const tone = (from: number, to: number, duration: number, type: OscillatorType, volume: number, delay = 0) => {
@@ -254,34 +257,119 @@ function playGameSound(kind: SoundKind) {
   }
 }
 
+function playGameSound(kind: SoundKind) {
+  if (!playAudioFile(kind)) playSynthSound(kind);
+}
+
+function unlockGameAudio() {
+  const audio = getGameAudioContext();
+  if (!audio) return;
+  void audio.resume().then(() => {
+    const buffer = audio.createBuffer(1, 1, audio.sampleRate);
+    const source = audio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audio.destination);
+    source.start();
+  }).catch(() => undefined);
+}
+
+function stopBearSynthLoop() {
+  if (bearSynthTimer !== null && typeof window !== "undefined") window.clearInterval(bearSynthTimer);
+  bearSynthTimer = null;
+}
+
+function startBearSynthLoop() {
+  if (typeof window === "undefined" || bearSynthTimer !== null) return;
+  playGameSound("bearWarning");
+  bearSynthTimer = window.setInterval(() => playGameSound("bearWarning"), 920);
+}
+
 function setBearDangerSound(active: boolean) {
-  if (!active && !activeBearDangerLoop) return;
+  if (!active && !activeBearDangerLoop && bearSynthTimer === null) return;
   if (active && !activeBearDangerLoop && typeof window !== "undefined") {
+    if (!new Audio().canPlayType('audio/ogg; codecs="vorbis"')) {
+      startBearSynthLoop();
+      return;
+    }
     const loop = new Audio("/sfx/monster-warning.ogg");
     loop.loop = true;
     loop.preload = "auto";
     loop.volume = SFX_VOLUME * .68;
-    void loop.play().catch(() => undefined);
+    void loop.play().then(stopBearSynthLoop).catch(startBearSynthLoop);
     activeBearDangerLoop = loop;
   } else if (!active && activeBearDangerLoop) {
     activeBearDangerLoop.pause();
     activeBearDangerLoop.currentTime = 0;
     activeBearDangerLoop = null;
+    stopBearSynthLoop();
+  } else if (!active) {
+    stopBearSynthLoop();
   }
+}
+
+function stopSynthBackgroundMusic() {
+  if (synthMusicTimer !== null && typeof window !== "undefined") window.clearInterval(synthMusicTimer);
+  synthMusicTimer = null;
+  synthMusicStep = 0;
+}
+
+function startSynthBackgroundMusic() {
+  if (typeof window === "undefined" || synthMusicTimer !== null) return;
+  const melody = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23, 246.94, 329.63, 392, 493.88];
+  const playNote = () => {
+    const audio = getGameAudioContext();
+    if (!audio || audio.state !== "running") return;
+    const now = audio.currentTime;
+    const frequency = melody[synthMusicStep % melody.length];
+    synthMusicStep += 1;
+    const gain = audio.createGain();
+    const lead = audio.createOscillator();
+    const glow = audio.createOscillator();
+    lead.type = "sine";
+    glow.type = "triangle";
+    lead.frequency.value = frequency;
+    glow.frequency.value = frequency / 2;
+    gain.gain.setValueAtTime(.0001, now);
+    gain.gain.exponentialRampToValueAtTime(.014, now + .035);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + .38);
+    lead.connect(gain);
+    glow.connect(gain);
+    gain.connect(audio.destination);
+    lead.start(now);
+    glow.start(now);
+    lead.stop(now + .4);
+    glow.stop(now + .4);
+  };
+  playNote();
+  synthMusicTimer = window.setInterval(playNote, 430);
+}
+
+function prepareBackgroundMusic() {
+  if (typeof window === "undefined" || !new Audio().canPlayType('audio/ogg; codecs="vorbis"')) return null;
+  if (!backgroundMusic) {
+    backgroundMusic = new Audio("/sfx/background-music.ogg");
+    backgroundMusic.loop = true;
+    backgroundMusic.preload = "auto";
+    backgroundMusic.volume = .14;
+    backgroundMusic.load();
+  }
+  return backgroundMusic;
 }
 
 function setBackgroundMusic(active: boolean) {
   if (typeof window === "undefined") return;
   if (active) {
-    if (!backgroundMusic) {
-      backgroundMusic = new Audio("/sfx/background-music.ogg");
-      backgroundMusic.loop = true;
-      backgroundMusic.preload = "auto";
-      backgroundMusic.volume = .14;
+    const music = prepareBackgroundMusic();
+    if (!music) {
+      startSynthBackgroundMusic();
+      return;
     }
-    void backgroundMusic.play().catch(() => undefined);
+    void music.play().then(stopSynthBackgroundMusic).catch(startSynthBackgroundMusic);
   } else if (backgroundMusic) {
     backgroundMusic.pause();
+    stopSynthBackgroundMusic();
+  } else {
+    stopSynthBackgroundMusic();
   }
 }
 
@@ -2508,6 +2596,7 @@ export default function Home() {
   const motionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    prepareBackgroundMusic();
     const timer = window.setTimeout(() => setBest(Number(localStorage.getItem("honeybee-harvest-v3") || 0)), 500);
     return () => {
       window.clearTimeout(timer);
@@ -2541,6 +2630,7 @@ export default function Home() {
     setPhase("failed");
   }, [best]);
   const startGame = () => {
+    unlockGameAudio();
     setBackgroundMusic(true);
     playGameSound("start");
     finishLock.current = false;
@@ -2549,7 +2639,8 @@ export default function Home() {
     setPhase("playing");
   };
   const requestMotion = async () => {
-    getGameAudioContext();
+    unlockGameAudio();
+    setBackgroundMusic(true);
     setMotionUnavailable(false);
     setMotionNotice("");
     try {
@@ -2571,6 +2662,7 @@ export default function Home() {
         setMotionNotice("没有收到体感数据，请确认浏览器已允许动作与方向访问");
       }, 2600);
     } catch (error) {
+      setBackgroundMusic(false);
       const reason = error instanceof Error ? error.message : "unknown";
       setMotionUnavailable(true);
       setMotionNotice(reason === "secure-context"
