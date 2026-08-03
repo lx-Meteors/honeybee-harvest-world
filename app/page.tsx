@@ -1433,100 +1433,6 @@ function generateWorld(state: GameState, targetY: number) {
   }
 }
 
-type FlowerPlatformPalette = {
-  top: string;
-  underside: string;
-  highlight: string;
-  detail: string;
-  center: string;
-};
-
-function traceFlowerPlatform(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, seed: number) {
-  const left = x - width / 2;
-  const right = x + width / 2;
-  const petalCount = Math.max(3, Math.min(7, Math.round(width / 17)));
-  const innerLeft = left + 6;
-  const innerRight = right - 6;
-  const petalWidth = (innerRight - innerLeft) / petalCount;
-  ctx.beginPath();
-  ctx.moveTo(left + 6, y + 7);
-  ctx.quadraticCurveTo(left - 1.5, y + 6, left, y);
-  ctx.quadraticCurveTo(left + .5, y - 4.5, innerLeft, y - 4.6);
-  for (let index = 0; index < petalCount; index += 1) {
-    const start = innerLeft + index * petalWidth;
-    const end = start + petalWidth;
-    const crest = y - 9.4 + Math.sin(seed * 1.71 + index * 2.13) * 1.05;
-    const join = y - 4.5 + Math.cos(seed * .83 + index * 1.67) * .45;
-    ctx.quadraticCurveTo((start + end) / 2, crest, end, join);
-  }
-  ctx.quadraticCurveTo(right - .5, y - 4, right, y + .4);
-  ctx.quadraticCurveTo(right + 1.2, y + 6, right - 6, y + 7.5);
-  ctx.quadraticCurveTo(x, y + 10.2, left + 6, y + 7);
-  ctx.closePath();
-}
-
-function drawFlowerPlatformPiece(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  sy: number,
-  width: number,
-  seed: number,
-  palette: FlowerPlatformPalette,
-  showCenter: boolean,
-) {
-  ctx.fillStyle = palette.underside;
-  ctx.strokeStyle = "#433934";
-  ctx.lineWidth = 2.5;
-  roundedRect(ctx, x - width / 2, sy - 1, width, 11, 6);
-  ctx.fill();
-  ctx.stroke();
-
-  const petalGradient = ctx.createLinearGradient(0, sy - 10, 0, sy + 8);
-  petalGradient.addColorStop(0, palette.highlight);
-  petalGradient.addColorStop(.38, palette.top);
-  petalGradient.addColorStop(1, palette.underside);
-  traceFlowerPlatform(ctx, x, sy, width, seed);
-  ctx.fillStyle = petalGradient;
-  ctx.strokeStyle = "#433934";
-  ctx.lineWidth = 2.5;
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.save();
-  traceFlowerPlatform(ctx, x, sy, width, seed);
-  ctx.clip();
-  ctx.strokeStyle = "rgba(255,255,255,.68)";
-  ctx.lineWidth = 1.7;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(x - width * .34, sy - 4.8);
-  ctx.quadraticCurveTo(x - width * .17, sy - 8, x - width * .03, sy - 5.9);
-  ctx.stroke();
-  ctx.strokeStyle = palette.detail;
-  ctx.globalAlpha = .58;
-  ctx.lineWidth = 1.15;
-  for (const offset of [-.29, -.14, .15, .3]) {
-    ctx.beginPath();
-    ctx.moveTo(x + width * offset, sy - 4.5);
-    ctx.quadraticCurveTo(x + width * offset * .96, sy, x + width * offset * 1.03, sy + 4.8);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  if (showCenter) {
-    ctx.fillStyle = palette.center;
-    ctx.beginPath();
-    ctx.arc(x - 2.3, sy - 1.8, 1.7, 0, Math.PI * 2);
-    ctx.arc(x + 1.2, sy - 2.4, 1.45, 0, Math.PI * 2);
-    ctx.arc(x + 3.3, sy - .7, 1.1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,245,174,.72)";
-    ctx.beginPath();
-    ctx.arc(x - 2.7, sy - 2.3, .55, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
 function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, time: number) {
   const shake = p.breaking > 0 ? Math.sin(time * 0.09) * 5 : 0;
   ctx.save();
@@ -1562,75 +1468,82 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
   const broken = p.kind === "broken";
   const moving = p.kind === "moving";
   const fading = p.kind === "fading";
-  const outline = "#433934";
-  const palette: FlowerPlatformPalette = broken
-    ? { top: "#b9855c", underside: "#79513b", highlight: "#e1bd98", detail: "#684334", center: "#6c5040" }
-    : moving
-      ? { top: "#58bfe7", underside: "#2589b6", highlight: "#b8edff", detail: "#176f9b", center: "#f2bd37" }
-      : fading
-        ? { top: "#f8eef4", underside: "#d9b9c7", highlight: "#ffffff", detail: "#c796ab", center: "#e8c59d" }
-        : { top: "#ef88a8", underside: "#c95c82", highlight: "#ffc8d8", detail: "#b74d73", center: "#e7a52d" };
+  const outline = "#403b38";
+  const board = broken ? "#9a765c" : moving ? "#39aee1" : fading ? "#fffdf7" : "#ff8fb1";
+  const boardLight = broken ? "#cfad91" : moving ? "#9fe5ff" : fading ? "#ffffff" : "#ffd0df";
+  const center = broken ? "#6c5040" : moving ? "#ffd34d" : fading ? "#efcad8" : "#f5ae29";
 
   ctx.fillStyle = "rgba(62,48,38,.16)";
   ctx.beginPath();
-  ctx.ellipse(p.x, sy + 10, p.width * .47, 3.8, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x, sy + 5.5, p.width * .48, 3, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = 2.2;
   if (broken) {
-    const gap = 8;
-    const half = (p.width - gap) / 2;
-    drawFlowerPlatformPiece(ctx, p.x - (half + gap) / 2, sy, half, p.id * 1.11, palette, false);
-    drawFlowerPlatformPiece(ctx, p.x + (half + gap) / 2, sy, half, p.id * 1.11 + 4.2, palette, false);
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(p.x - gap / 2 - 1, sy - 7);
-    ctx.lineTo(p.x - gap / 2 - 5, sy - 2);
-    ctx.lineTo(p.x - gap / 2, sy + 2);
-    ctx.moveTo(p.x + gap / 2 + 1, sy - 7);
-    ctx.lineTo(p.x + gap / 2 + 5, sy - 2);
-    ctx.lineTo(p.x + gap / 2, sy + 3);
-    ctx.stroke();
-    ctx.fillStyle = "#8d654c";
-    ctx.beginPath();
-    ctx.arc(p.x - 2, sy + 8, 1.8, 0, Math.PI * 2);
-    ctx.arc(p.x + 4, sy + 11, 1.3, 0, Math.PI * 2);
+    const half = p.width * .42;
+    ctx.fillStyle = board;
+    roundedRect(ctx, p.x - p.width * .49, sy - 5, half, 11, 5);
     ctx.fill();
+    ctx.stroke();
+    roundedRect(ctx, p.x + p.width * .07, sy - 5, half, 11, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = boardLight;
+    roundedRect(ctx, p.x - p.width * .42, sy - 2.5, p.width * .2, 2.5, 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(p.x - 4, sy - 6);
+    ctx.lineTo(p.x + 2, sy - 1);
+    ctx.lineTo(p.x - 2, sy + 6);
+    ctx.moveTo(p.x + 4, sy - 5);
+    ctx.lineTo(p.x - 1, sy);
+    ctx.lineTo(p.x + 4, sy + 5);
+    ctx.stroke();
   } else {
-    drawFlowerPlatformPiece(ctx, p.x, sy, p.width, p.id * 1.11, palette, true);
+    ctx.fillStyle = board;
+    roundedRect(ctx, p.x - p.width / 2, sy - 5.5, p.width, 12, 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = boardLight;
+    roundedRect(ctx, p.x - p.width * .37, sy - 3.3, p.width * .37, 2.7, 2);
+    ctx.fill();
+    ctx.fillStyle = center;
+    ctx.beginPath();
+    ctx.ellipse(p.x, sy, Math.min(14, p.width * .18), 4.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = moving ? "#177ead" : fading ? "#d8a9ba" : "#d76289";
+    ctx.lineWidth = 1.2;
+    for (const offset of [-.3, .3]) {
+      ctx.beginPath();
+      ctx.moveTo(p.x + p.width * offset, sy - 3.4);
+      ctx.quadraticCurveTo(p.x + p.width * offset * .82, sy, p.x + p.width * offset, sy + 3.8);
+      ctx.stroke();
+    }
   }
   if (p.kind === "spring") {
-    const compress = Math.sin(time * .012 + p.id) * 1.05;
-    ctx.fillStyle = "#dce5e8";
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2.1;
-    roundedRect(ctx, p.x - 14, sy - 10, 28, 5, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = "#4e5960";
-    ctx.lineWidth = 3.2;
-    for (let coil = 0; coil < 4; coil += 1) {
-      ctx.beginPath();
-      ctx.ellipse(p.x, sy - 11.5 - coil * (3.45 + compress * .08), 11.5 - coil * .5, 2.45, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.strokeStyle = "rgba(244,252,255,.9)";
-    ctx.lineWidth = 1.2;
-    for (let coil = 0; coil < 4; coil += 1) {
-      ctx.beginPath();
-      ctx.ellipse(p.x, sy - 12.1 - coil * (3.45 + compress * .08), 10.8 - coil * .5, 1.45, 0, Math.PI, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.fillStyle = "#eef4f5";
+    const compress = Math.sin(time * .012 + p.id) * 1.3;
+    ctx.fillStyle = "#f7c833";
     ctx.strokeStyle = outline;
     ctx.lineWidth = 2;
-    roundedRect(ctx, p.x - 13, sy - 27 - compress, 26, 5.5, 3);
+    roundedRect(ctx, p.x - 15, sy - 13, 30, 6, 3);
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,.82)";
-    roundedRect(ctx, p.x - 8, sy - 25.8 - compress, 9, 1.2, 1);
+    ctx.strokeStyle = "#565d65";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    for (let i = 0; i <= 7; i += 1) {
+      const px = p.x - 10.5 + i * 3;
+      const py = sy - 10 - (i % 2 ? 11 + compress : 0);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#f7c833";
+    ctx.strokeStyle = outline;
+    roundedRect(ctx, p.x - 13, sy - 25 - compress, 26, 6, 3);
     ctx.fill();
+    ctx.stroke();
   }
   ctx.restore();
 }
