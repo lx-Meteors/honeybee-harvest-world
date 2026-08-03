@@ -2707,15 +2707,25 @@ export default function Home() {
               <button className="cover-primary" onClick={requestMotion}>开始采蜜</button>
             </div>
             <p className="cover-footnote">左右晃动控制方向 · 小蜜蜂自动飞跃</p>
-            <button className="leaderboard-button" type="button" data-leaderboard-entry aria-label="排行榜">
-              <span aria-hidden="true">♛</span>
-              <small>排行榜</small>
-            </button>
+            <div className="cover-story-scene" aria-hidden="true">
+              <span className="story-jar"><i /></span>
+              <span className="story-route"><i /><i /><i /><i /></span>
+              <span className="story-bloom story-bloom-one" />
+              <span className="story-bloom story-bloom-two" />
+            </div>
           </div>
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
         {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌼</span><p className="intro-kicker">休息一下</p><h2>采蜜暂停</h2><p>当前采蜜值已为你保留。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
         {phase === "failed" && <div className="game-overlay result-overlay">
+          <div className="result-float-layer" aria-hidden="true">
+            <i className="result-float result-drop float-one" />
+            <i className="result-float result-petal float-two" />
+            <i className="result-float result-spark float-three" />
+            <i className="result-float result-drop float-four" />
+            <i className="result-float result-petal float-five" />
+            <i className="result-float result-spark float-six" />
+          </div>
           <div className="result-sheet">
             <div className="result-emblem">
               <div className="result-bee" />
@@ -2730,6 +2740,9 @@ export default function Home() {
             <div className="result-stats">
               <div><small>最高纪录</small><strong>{best}</strong></div>
             </div>
+            <button className="result-leaderboard" type="button" data-leaderboard-entry>
+              <span aria-hidden="true">♛</span><b>排行榜</b><i aria-hidden="true">›</i>
+            </button>
             <div className="result-actions">
               <button className="result-secondary" onClick={() => setPhase("menu")}>返回花园</button>
               <button className="result-primary" onClick={startGame}>再飞一次</button>
