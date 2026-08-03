@@ -2634,38 +2634,23 @@ export default function Home() {
         </header>
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
-          <div className="cover-frame">
-            <div className="cover-garden" aria-hidden="true">
-              <span className="garden-hive garden-hive-left" />
-              <span className="garden-hive garden-hive-right" />
-              <span className="garden-flower garden-flower-left" />
-              <span className="garden-flower garden-flower-center" />
-              <span className="garden-flower garden-flower-right" />
-            </div>
-            <div className="cover-plaque"><i />蜂蜜花园采蜜令<i /></div>
-            <div className="cover-hero" aria-hidden="true">
-              <span className="cover-halo" />
-              <span className="cover-flower flower-one" />
-              <span className="cover-flower flower-two" />
-              <span className="cover-flower flower-three" />
-              <div className="cover-bee" />
-            </div>
-            <div className="cover-title">
-              <h2>小蜜蜂<br /><em>采蜜世界</em></h2>
-            </div>
-            <div className="cover-story-card">
-              <span className="cover-story-jar" aria-hidden="true"><i /></span>
-              <p><strong>花园的蜂蜜快用完了！</strong><small>踩着花朵采满蜂蜜，飞回温暖的蜂巢。</small></p>
+          <div className="cover-frame cover-frame-v2">
+            <div className="cover-logo-v2">
+              <h2><span>小蜜蜂</span><strong>采蜜世界</strong></h2>
+              <p>飞过花园，收集甜甜蜂蜜</p>
             </div>
             <div className="cover-actions">
               <button className="cover-primary" onClick={requestMotion}>开始采蜜</button>
             </div>
-            <p className="cover-footnote">左右晃动控制方向 · 小蜜蜂自动飞跃</p>
+            <div className="cover-motion-v2" aria-label="左右晃动控制方向">
+              <span>←</span><i>☝</i><span>→</span>
+              <b>左右晃动控制方向</b>
+            </div>
           </div>
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
         {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌼</span><p className="intro-kicker">休息一下</p><h2>采蜜暂停</h2><p>当前采蜜值已为你保留。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
-        {phase === "failed" && <div className="game-overlay result-overlay">
+        {phase === "failed" && <div className="game-overlay result-overlay result-overlay-v2">
           <div className="result-float-layer" aria-hidden="true">
             <i className="result-float result-drop float-one" />
             <i className="result-float result-petal float-two" />
@@ -2674,11 +2659,7 @@ export default function Home() {
             <i className="result-float result-petal float-five" />
             <i className="result-float result-spark float-six" />
           </div>
-          <div className="result-sheet">
-            <div className="result-emblem">
-              <div className="result-bee" />
-              <span>{result.honey >= best ? "★" : "🍯"}</span>
-            </div>
+          <div className="result-sheet result-sheet-v2">
             <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
             <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
             <div className="result-main-score">
@@ -2692,8 +2673,8 @@ export default function Home() {
               <span aria-hidden="true">♛</span><b>排行榜</b><i aria-hidden="true">›</i>
             </button>
             <div className="result-actions">
-              <button className="result-secondary" onClick={() => setPhase("menu")}>返回花园</button>
               <button className="result-primary" onClick={startGame}>再飞一次</button>
+              <button className="result-secondary" onClick={() => setPhase("menu")}>返回花园</button>
             </div>
           </div>
         </div>}
