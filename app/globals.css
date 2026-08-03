@@ -558,14 +558,12 @@ button { font: inherit; }
   color: #65451f;
   box-shadow: 0 4px 0 rgba(136,87,29,.18);
 }
-.game-message { position: absolute; z-index: 5; top: 86px; left: 50%; width: max-content; max-width: calc(100% - 40px); transform: translateX(-50%); padding: 11px 18px; border: 2px solid rgba(255,199,56,.48); border-radius: 20px; background: rgba(255,253,235,.96); color: #774714; font-size: 13px; font-weight: 900; line-height: 1.35; text-align: center; white-space: normal; box-shadow: 0 8px 24px rgba(87,74,41,.18); animation: pop .2s ease-out; }
 .touch-hint { position: absolute; z-index: 4; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: 16px; background: rgba(48,61,43,.38); color: #fff; font-size: 12px; font-weight: 700; pointer-events: none; animation: fade-away 3.5s forwards; }
 .motion-status { position: absolute; z-index: 6; bottom: 17px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; max-width: calc(100% - 28px); padding: 8px 13px; border-radius: 18px; background: rgba(44,93,70,.75); color: #fff; font-size: 11px; font-weight: 800; white-space: nowrap; pointer-events: none; backdrop-filter: blur(7px); animation: fade-away 4.5s forwards; }
 .motion-status span { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #8bf0a8; box-shadow: 0 0 0 4px rgba(139,240,168,.18); }
 .motion-status.is-error { white-space: normal; width: max-content; background: rgba(142,67,44,.88); animation: none; }
 .motion-status.is-error span { background: #ffd19c; box-shadow: 0 0 0 4px rgba(255,209,156,.18); }
 
-@keyframes pop { from { transform: translateX(-50%) scale(.78); opacity: 0; } }
 @keyframes fade-away { 0%,65% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes bee-float { 0%,100% { transform: translateY(2px) rotate(-5deg); } 50% { transform: translateY(-7px) rotate(3deg); } }
 @keyframes cover-flight {

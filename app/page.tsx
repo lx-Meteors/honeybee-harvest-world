@@ -65,8 +65,6 @@ type GameState = {
   invincible: number;
   rocketTimer: number;
   copterTimer: number;
-  message: string;
-  messageTimer: number;
   lastTime: number;
   ended: boolean;
 };
@@ -413,8 +411,6 @@ function firstState(): GameState {
     invincible: 0,
     rocketTimer: 0,
     copterTimer: 0,
-    message: "",
-    messageTimer: 0,
     lastTime: 0,
     ended: false,
   };
@@ -2070,7 +2066,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   phase: Phase;
   controlMode: ControlMode;
   resetToken: number;
-  onStats: (honey: number, height: number, message: string, ammo: number) => void;
+  onStats: (honey: number, height: number, ammo: number) => void;
   onFail: (honey: number, height: number) => void;
   onMotionDetected: () => void;
 }) {
@@ -2288,8 +2284,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       state.invincible = Math.max(0, state.invincible - dt);
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
       state.copterTimer = Math.max(0, state.copterTimer - dt);
-      state.messageTimer = Math.max(0, state.messageTimer - dt);
-      if (state.messageTimer <= 0) state.message = "";
       for (const item of state.airItems) {
         const sy = screenY(item.y, state.cameraY);
         if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
@@ -2367,8 +2361,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           const sy = screenY(landing.y, state.cameraY);
           if (landing.kind === "broken") {
             landing.breaking = .01;
-            state.message = "裂花碎了！继续下落";
-            state.messageTimer = .9;
             playGameSound("break");
             burst(state, landing.x, sy, "#c7aaa0", 13);
           } else {
@@ -2376,8 +2368,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
             state.vy = landing.kind === "spring" ? SPRING_SPEED : JUMP_SPEED;
             if (landing.kind === "fading") landing.breaking = .01;
             if (!landing.used && landing.kind === "spring") {
-              state.message = "弹簧启动 · 跃升约八层";
-              state.messageTimer = .85;
               playGameSound("spring");
               burst(state, landing.x, sy, "#fff0a0", 15);
             } else playGameSound("bounce");
@@ -2396,8 +2386,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           item.used = true;
           shot.life = 0;
           state.bonusHoney += 100;
-          state.message = `花粉弹击退${item.kind === "bear" ? "红绒怪" : item.kind === "hornet" ? "紫果冻怪" : "蓝眼怪"} +100`;
-          state.messageTimer = 1;
           playGameSound("hit");
           burst(state, item.x, screenY(item.y, state.cameraY), "#ffd12f", 20);
           break;
@@ -2422,8 +2410,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
             state.ammoProgress -= 3;
             state.ammo = Math.min(2, state.ammo + 1);
           }
-          state.message = `蜂蜜罐 +${value}`;
-          state.messageTimer = .85;
           playGameSound("honey");
           burst(state, item.x, sy, "#ffd34d", 18);
         } else if (item.kind === "rocket") {
@@ -2431,32 +2417,24 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           state.rocketTimer = ROCKET_FLIGHT_TIME;
           state.copterTimer = 0;
           state.vy = ROCKET_SPEED;
-          state.message = "火箭点火 · 超长飞跃！";
-          state.messageTimer = 1.2;
           playGameSound("rocket");
           burst(state, item.x, sy, "#ffb62b", 18);
         } else if (item.kind === "bambooCopter") {
           item.used = true;
           state.copterTimer = COPTER_FLIGHT_TIME;
           state.vy = COPTER_SPEED;
-          state.message = "竹蜻蜓启动 · 飞跃约十二层";
-          state.messageTimer = 1.1;
           playGameSound("copter");
           burst(state, item.x, sy, "#8dd477", 18);
         } else if (item.kind === "bear" || item.kind === "hornet" || item.kind === "bat") {
-          const monsterName = item.kind === "bear" ? "红绒怪" : item.kind === "hornet" ? "紫果冻怪" : "蓝眼怪";
           const stomped = state.vy < 0 && state.beeY > item.y + 18;
           if (stomped) {
             item.used = true;
             state.bonusHoney += 100;
             state.vy = JUMP_SPEED * .9;
-            state.message = `踩中${monsterName} +100`;
-            state.messageTimer = 1.1;
             playGameSound("hit");
             burst(state, item.x, sy, "#ffbd23", 20);
           } else {
             state.ended = true;
-            state.message = `撞到${monsterName}！`;
             state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
             playGameSound("fail");
             onFail(state.honey, heightMeters(state.highest));
@@ -2464,14 +2442,12 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           }
         } else if (item.kind === "blackHole") {
           state.ended = true;
-          state.message = "被黑洞吸入了！";
           state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
           playGameSound("fail");
           onFail(state.honey, heightMeters(state.highest));
           break;
         } else if (item.kind === "web") {
           state.ended = true;
-          state.message = "被蜘蛛网吸住了！";
           state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
           playGameSound("fail");
           onFail(state.honey, heightMeters(state.highest));
@@ -2488,7 +2464,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       state.platforms = state.platforms.filter((p) => p.y > state.cameraY - 180);
       state.airItems = state.airItems.filter((item) => item.y > state.cameraY - 180);
       state.particles = state.particles.map((p) => ({ ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + 70 * dt, life: p.life - dt })).filter((p) => p.life > 0);
-      onStats(state.honey, heightMeters(state.highest), state.message, state.ammo);
+      onStats(state.honey, heightMeters(state.highest), state.ammo);
       if (!state.ended && state.beeY < state.cameraY - 95) {
         state.ended = true;
         playGameSound("fail");
@@ -2522,16 +2498,12 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const state = stateRef.current;
     if (phaseRef.current !== "playing" || state.ammo <= 0) {
       if (phaseRef.current === "playing") {
-        state.message = "花粉弹不足 · 收集3罐蜂蜜补充";
-        state.messageTimer = .9;
         playGameSound("empty");
       }
       return;
     }
     state.ammo -= 1;
     state.shots.push({ x: state.beeX, y: state.beeY + 30, vy: 650, life: 1.25 });
-    state.message = "花粉弹发射！";
-    state.messageTimer = .45;
     playGameSound("shoot");
   };
   return <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="game-canvas" aria-label="无限向上的小蜜蜂花台跳跃游戏" onPointerDown={(event) => {
@@ -2553,7 +2525,7 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
-  const [stats, setStats] = useState({ honey: 0, height: 0, message: "", ammo: 1 });
+  const [stats, setStats] = useState({ honey: 0, height: 0, ammo: 1 });
   const [result, setResult] = useState({ honey: 0, height: 0 });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
@@ -2583,8 +2555,8 @@ export default function Home() {
     setMotionNotice("体感已连接 · 左右晃动手机");
   }, []);
 
-  const onStats = useCallback((honey: number, height: number, message: string, ammo: number) => {
-    setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.message === message && old.ammo === ammo ? old : { honey, height, message, ammo });
+  const onStats = useCallback((honey: number, height: number, ammo: number) => {
+    setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.ammo === ammo ? old : { honey, height, ammo });
   }, []);
   const onFail = useCallback((honey: number, height: number) => {
     if (finishLock.current) return;
@@ -2600,7 +2572,7 @@ export default function Home() {
     setBackgroundMusic(true);
     playGameSound("start");
     finishLock.current = false;
-    setStats({ honey: 0, height: 0, message: "", ammo: 1 });
+    setStats({ honey: 0, height: 0, ammo: 1 });
     setResetToken((value) => value + 1);
     setPhase("playing");
   };
@@ -2659,7 +2631,6 @@ export default function Home() {
           <div className="best-score"><span className="record-crown">♛</span><span><small>最高纪录</small><b>{Math.max(best, stats.honey)}</b></span></div>
         </header>
         {phase === "playing" && <div className="power-hud"><div className="ammo-chip" aria-label={`剩余${stats.ammo}发花粉弹`}><span>花粉弹 ✦</span>{Array.from({ length: 2 }, (_, i) => <i className={i < stats.ammo ? "loaded" : ""} key={i} />)}</div></div>}
-        {stats.message && phase === "playing" && <div className="game-message">{stats.message}</div>}
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
           <div className="cover-frame">
