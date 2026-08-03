@@ -2635,10 +2635,7 @@ export default function Home() {
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
           <div className="cover-frame cover-frame-v2">
-            <div className="cover-logo-v2">
-              <h2><span>小蜜蜂</span><strong>采蜜世界</strong></h2>
-              <p>飞过花园，收集甜甜蜂蜜</p>
-            </div>
+            <div className="cover-logo-v2" role="img" aria-label="小蜜蜂采蜜世界，飞过花园，收集甜甜蜂蜜" />
             <div className="cover-actions">
               <button className="cover-primary" onClick={requestMotion}>开始采蜜</button>
             </div>
