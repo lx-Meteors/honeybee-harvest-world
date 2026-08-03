@@ -2692,6 +2692,13 @@ export default function Home() {
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
           <div className="cover-frame">
+            <div className="cover-garden" aria-hidden="true">
+              <span className="garden-hive garden-hive-left" />
+              <span className="garden-hive garden-hive-right" />
+              <span className="garden-flower garden-flower-left" />
+              <span className="garden-flower garden-flower-center" />
+              <span className="garden-flower garden-flower-right" />
+            </div>
             <div className="cover-plaque"><i />蜂蜜花园采蜜令<i /></div>
             <div className="cover-hero" aria-hidden="true">
               <span className="cover-halo" />
@@ -2703,16 +2710,14 @@ export default function Home() {
             <div className="cover-title">
               <h2>小蜜蜂<br /><em>采蜜世界</em></h2>
             </div>
+            <div className="cover-story-card">
+              <span className="cover-story-jar" aria-hidden="true"><i /></span>
+              <p><strong>花园的蜂蜜快用完了！</strong><small>踩着花朵采满蜂蜜，飞回温暖的蜂巢。</small></p>
+            </div>
             <div className="cover-actions">
               <button className="cover-primary" onClick={requestMotion}>开始采蜜</button>
             </div>
             <p className="cover-footnote">左右晃动控制方向 · 小蜜蜂自动飞跃</p>
-            <div className="cover-story-scene" aria-hidden="true">
-              <span className="story-jar"><i /></span>
-              <span className="story-route"><i /><i /><i /><i /></span>
-              <span className="story-bloom story-bloom-one" />
-              <span className="story-bloom story-bloom-two" />
-            </div>
           </div>
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
