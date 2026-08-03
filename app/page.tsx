@@ -2656,6 +2656,7 @@ export default function Home() {
             <i className="result-float result-petal float-five" />
             <i className="result-float result-spark float-six" />
           </div>
+          <div className="result-hero-v3" aria-hidden="true" />
           <div className="result-sheet result-sheet-v2">
             <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
             <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
