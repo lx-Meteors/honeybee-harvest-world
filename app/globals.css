@@ -76,6 +76,7 @@ button { font: inherit; }
 
 .game-phone {
   position: relative;
+  container: game / size;
   width: min(540px, calc(100vw - 32px));
   aspect-ratio: 3 / 4;
   max-height: calc(100vh - 32px);
@@ -279,35 +280,6 @@ button { font: inherit; }
   font-size: 12px;
   font-weight: 700;
 }
-.cover-rule {
-  position: relative;
-  z-index: 2;
-  width: min(340px, 100%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 13px 0 11px;
-  padding: 9px 14px;
-  border: 1px solid #d8bc6a;
-  border-radius: 14px;
-  background: rgba(255,251,226,.88);
-  box-shadow: 0 5px 0 rgba(149,107,31,.12);
-  text-align: left;
-}
-.cover-rule-icon {
-  display: grid;
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border-radius: 50%;
-  background: #ffe48b;
-  font-size: 19px;
-}
-.cover-rule b,
-.cover-rule small { display: block; }
-.cover-rule b { color: #57371e; font-size: 12px; }
-.cover-rule small { margin-top: 2px; color: #8b7555; font-size: 10px; }
 .cover-actions {
   position: relative;
   z-index: 2;
@@ -601,6 +573,237 @@ button { font: inherit; }
   50% { transform: translateX(-50%) translateY(-7px) rotate(1deg); }
 }
 
+/* Cover and result panels share one compact, phone-safe visual system. */
+.intro-overlay {
+  padding: 18px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(255,255,255,.5), transparent 32%),
+    linear-gradient(180deg, rgba(255,231,118,.16), rgba(102,183,117,.2)),
+    url('/game-background-long.png') center / cover;
+  background-color: #c9efd1;
+}
+.cover-frame {
+  width: min(100%, 446px);
+  height: min(100%, 672px);
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 18px 22px 15px;
+  border: 2px solid #a86c1c;
+  border-radius: 25px;
+  background:
+    radial-gradient(circle at 50% 25%, rgba(255,255,255,.92), rgba(255,251,216,.66) 38%, transparent 62%),
+    linear-gradient(180deg, rgba(255,250,211,.92), rgba(222,244,179,.9));
+  box-shadow:
+    0 0 0 4px #efb433,
+    0 0 0 6px rgba(116,69,18,.66),
+    0 18px 38px rgba(66,57,25,.2),
+    inset 0 0 0 1px rgba(255,255,255,.92);
+}
+.cover-frame::before {
+  bottom: -76px;
+  height: 160px;
+  opacity: .82;
+}
+.cover-frame::after {
+  width: 72px;
+  height: 72px;
+  right: -26px;
+  top: 126px;
+  border-width: 10px;
+}
+.cover-plaque {
+  min-height: 30px;
+  padding-inline: 15px;
+  border-radius: 15px;
+  font-size: 11px;
+  letter-spacing: .14em;
+}
+.cover-hero {
+  flex: 0 0 166px;
+  width: 218px;
+  margin-top: 1px;
+}
+.cover-halo {
+  top: 12px;
+  width: 148px;
+  height: 148px;
+}
+.cover-bee {
+  top: 0;
+  width: 158px;
+  height: 164px;
+}
+.flower-one { left: 9px; top: 52px; }
+.flower-two { right: 6px; top: 41px; }
+.flower-three { right: 27px; bottom: 5px; }
+.cover-title { margin-top: -2px; }
+.cover-title small {
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+.cover-title h2 {
+  font-size: 37px;
+  line-height: .91;
+}
+.cover-title p {
+  max-width: 320px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.cover-actions {
+  width: min(326px, 100%);
+  gap: 7px;
+  margin-top: 17px;
+}
+.cover-primary {
+  min-height: 46px;
+  border-radius: 15px;
+  background: linear-gradient(180deg,#efad22,#d88211);
+  color: #fffdf0;
+  box-shadow: 0 5px 0 #9f570d, 0 9px 17px rgba(117,70,17,.2);
+}
+.cover-secondary {
+  min-height: 34px;
+  background: rgba(255,252,230,.82);
+}
+.cover-footnote {
+  margin-top: 9px;
+  color: #657144;
+}
+.cover-frame > .permission-note {
+  position: relative;
+  inset: auto;
+  width: min(326px, 100%);
+  margin: 8px 0 0;
+  padding: 6px 9px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.result-overlay {
+  padding: 40px 23px 18px;
+  background: linear-gradient(180deg, rgba(44,74,55,.54), rgba(64,50,27,.62));
+}
+.result-sheet {
+  width: min(100%, 430px);
+  max-height: 100%;
+  min-height: 0;
+  padding: 49px 18px 17px;
+  border-width: 2px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(255,220,91,.3), transparent 31%),
+    linear-gradient(180deg,#fffbea,#fff7d5);
+  box-shadow:
+    0 0 0 4px #efb633,
+    0 0 0 6px rgba(91,53,14,.48),
+    0 18px 42px rgba(37,25,11,.32),
+    inset 0 0 0 1px #fff;
+}
+.result-emblem {
+  top: -43px;
+  width: 88px;
+  height: 88px;
+  border-width: 4px;
+  box-shadow: 0 0 0 4px #f7c943, 0 9px 21px rgba(74,44,13,.24), inset 0 0 0 3px rgba(255,255,255,.28);
+}
+.result-emblem > span {
+  right: -5px;
+  bottom: -1px;
+  width: 27px;
+  height: 27px;
+  font-size: 13px;
+}
+.result-plaque {
+  margin-bottom: 9px;
+  padding: 5px 13px;
+  border-radius: 13px;
+  font-size: 10px;
+}
+.result-sheet h2 { font-size: 25px; }
+.result-copy {
+  margin: 7px auto 10px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.result-main-score {
+  padding: 9px;
+  border-radius: 15px;
+}
+.result-main-score strong { font-size: 39px; }
+.result-stats {
+  gap: 8px;
+  margin-top: 8px;
+}
+.result-stats > div { padding: 8px; }
+.result-stats strong { font-size: 20px; }
+.result-ranking { margin: 10px 0; }
+.result-actions { gap: 8px; }
+.result-primary,
+.result-secondary {
+  min-height: 43px;
+  border-radius: 13px;
+  font-size: 12px;
+}
+
+@container game (max-height: 620px) {
+  .intro-overlay { padding: 12px; }
+  .cover-frame {
+    height: 100%;
+    padding: 12px 18px 10px;
+    border-radius: 21px;
+  }
+  .cover-plaque { min-height: 27px; font-size: 10px; }
+  .cover-hero { flex-basis: 132px; width: 188px; }
+  .cover-halo { top: 8px; width: 118px; height: 118px; }
+  .cover-bee { width: 132px; height: 135px; }
+  .cover-flower { transform-origin: center; }
+  .flower-one { left: 9px; top: 39px; transform: rotate(-10deg) scale(.62); }
+  .flower-two { right: 7px; top: 31px; transform: rotate(13deg) scale(.54); }
+  .flower-three { right: 27px; bottom: 2px; transform: rotate(-8deg) scale(.4); }
+  .cover-title small { font-size: 9px; }
+  .cover-title h2 { font-size: 32px; }
+  .cover-title p { margin-top: 6px; font-size: 10px; }
+  .cover-actions { margin-top: 10px; gap: 5px; }
+  .cover-primary { min-height: 41px; font-size: 14px; }
+  .cover-secondary { min-height: 30px; font-size: 11px; }
+  .cover-footnote { margin-top: 7px; font-size: 8px; }
+  .cover-frame > .permission-note { margin-top: 5px; padding-block: 4px; font-size: 9px; }
+
+  .result-overlay { padding: 34px 16px 11px; }
+  .result-sheet { padding: 40px 15px 13px; border-radius: 21px; }
+  .result-emblem { top: -35px; width: 72px; height: 72px; }
+  .result-emblem > span { width: 23px; height: 23px; border-width: 2px; font-size: 11px; }
+  .result-plaque { margin-bottom: 6px; padding: 4px 11px; font-size: 9px; }
+  .result-sheet h2 { font-size: 22px; }
+  .result-copy { margin: 5px auto 7px; font-size: 10px; }
+  .result-main-score { padding: 7px; }
+  .result-main-score strong { font-size: 34px; }
+  .result-stats { margin-top: 6px; }
+  .result-stats > div { padding: 6px; }
+  .result-stats strong { font-size: 18px; }
+  .result-ranking { margin: 7px 0; font-size: 9px; }
+  .result-primary,
+  .result-secondary { min-height: 39px; }
+}
+
+@container game (max-height: 500px) {
+  .cover-hero { flex-basis: 108px; }
+  .cover-halo { width: 98px; height: 98px; }
+  .cover-bee { width: 111px; height: 112px; }
+  .cover-title h2 { font-size: 29px; }
+  .cover-title p,
+  .cover-footnote { display: none; }
+  .cover-actions { margin-top: 8px; }
+  .result-copy,
+  .result-ranking { display: none; }
+  .result-sheet { padding-top: 37px; }
+  .result-main-score { margin-top: 7px; }
+  .result-primary,
+  .result-secondary { min-height: 36px; }
+}
+
 @media (max-width: 760px) {
   body { background: #9de1da; }
   .page-shell {
@@ -609,10 +812,20 @@ button { font: inherit; }
     place-items: center;
     gap: 0;
     padding: 0;
-    min-height: 100dvh;
+    width: 100%;
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
   }
   .brand-panel { display: none; }
-  .game-phone { width: min(100vw, 75dvh); height: auto; max-height: 100dvh; aspect-ratio: 3 / 4; border-radius: 0; border-width: 0; box-shadow: 0 0 50px rgba(25,89,72,.22); }
+  .game-phone { width: min(100vw, 75svh); height: auto; max-height: 100svh; aspect-ratio: 3 / 4; border-radius: 0; border-width: 0; box-shadow: 0 0 50px rgba(25,89,72,.22); }
+}
+
+@supports (height: 100dvh) {
+  @media (max-width: 760px) {
+    .page-shell { height: 100dvh; min-height: 100dvh; }
+    .game-phone { width: min(100vw, 75dvh); max-height: 100dvh; }
+  }
 }
 
 @media (max-height: 700px) and (min-width: 761px) {

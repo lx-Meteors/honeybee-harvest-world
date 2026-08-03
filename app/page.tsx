@@ -6,7 +6,6 @@ type Phase = "menu" | "playing" | "paused" | "failed";
 type ControlMode = "motion" | "touch";
 type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading";
 type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar";
-type TutorialKey = PlatformKind | AirKind;
 type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
 
 type Platform = {
@@ -68,8 +67,6 @@ type GameState = {
   copterTimer: number;
   message: string;
   messageTimer: number;
-  tutorialTimer: number;
-  taught: Record<TutorialKey, boolean>;
   lastTime: number;
   ended: boolean;
 };
@@ -416,10 +413,8 @@ function firstState(): GameState {
     invincible: 0,
     rocketTimer: 0,
     copterTimer: 0,
-    message: "粉色花台：可以安全弹跳",
-    messageTimer: 2.6,
-    tutorialTimer: 1.4,
-    taught: { flower: true, broken: false, spring: false, moving: false, cloud: false, fading: false, bear: false, web: false, blackHole: false, hornet: false, bat: false, rocket: false, bambooCopter: false, honeyJar: false },
+    message: "",
+    messageTimer: 0,
     lastTime: 0,
     ended: false,
   };
@@ -2294,35 +2289,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
       state.copterTimer = Math.max(0, state.copterTimer - dt);
       state.messageTimer = Math.max(0, state.messageTimer - dt);
-      state.tutorialTimer = Math.max(0, state.tutorialTimer - dt);
       if (state.messageTimer <= 0) state.message = "";
-
-      const tutorialText: Partial<Record<TutorialKey, string>> = {
-        broken: "裂开的花：踩上去会碎，不能弹跳！",
-        spring: "弹簧花：踩中银色弹簧，跃升约八层",
-        moving: "蓝色飞行花：会左右移动",
-        cloud: "漂浮云阶：跟随云朵移动再起跳",
-        fading: "透明花：只能踩一次",
-        honeyJar: "蜂蜜罐：采蜜值 +50",
-        bear: "红绒怪：踩头可击退，侧面碰到就会失败",
-        web: "蜘蛛网：碰到就会被吸住",
-        blackHole: "黑洞：会吸引小蜜蜂，碰到就会失败",
-        hornet: "紫果冻怪：横向漂浮，可以踩头或用花粉弹击退",
-        bat: "蓝眼怪：会巡逻挡路，可以踩头或射击",
-        rocket: "花蜜火箭：超长飞跃约十五层",
-        bambooCopter: "竹蜻蜓：持续旋转升空约九层",
-      };
-      const teach = (kind: TutorialKey) => {
-        if (state.tutorialTimer > 0 || state.taught[kind] || !tutorialText[kind]) return;
-        state.taught[kind] = true;
-        state.message = tutorialText[kind] ?? "";
-        state.messageTimer = 3;
-        state.tutorialTimer = 1.15;
-      };
-      for (const p of state.platforms) {
-        const sy = screenY(p.y, state.cameraY);
-        if (sy > 135 && sy < HEIGHT - 105) teach(p.kind);
-      }
       for (const item of state.airItems) {
         const sy = screenY(item.y, state.cameraY);
         if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
@@ -2334,7 +2301,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           item.audioPlayed = true;
           playGameSound("blackHole");
         }
-        if (!item.used && sy > 150 && sy < HEIGHT - 120) teach(item.kind);
       }
       const bearDangerActive = state.airItems.some((item) => {
         if (item.used || (item.kind !== "bear" && item.kind !== "hornet" && item.kind !== "bat")) return false;
@@ -2709,10 +2675,6 @@ export default function Home() {
               <small>向上飞 · 带蜂蜜回家</small>
               <h2>小蜜蜂<br /><em>采蜜世界</em></h2>
               <p>晃动手机控制方向，踩着花朵不断向上飞跃。</p>
-            </div>
-            <div className="cover-rule">
-              <span className="cover-rule-icon">🍯</span>
-              <span><b>采蜜值就是最终成绩</b><small>飞得越高，发现的蜂蜜越多</small></span>
             </div>
             <div className="cover-actions">
               <button className="cover-primary" onClick={requestMotion}>开始体感采蜜</button>
