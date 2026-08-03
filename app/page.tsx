@@ -1520,30 +1520,84 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
     }
   }
   if (p.kind === "spring") {
-    const breathe = Math.sin(time * .009 + p.id) * .35;
-    const baseY = sy - 7;
+    const pulse = (Math.sin(time * .007 + p.id) + 1) * .5;
+    const baseY = sy - 8;
+    const spacing = 3.7 - pulse * .22;
+    const turns = 5;
+    const topY = baseY - (turns - 1) * spacing;
     ctx.save();
     ctx.lineCap = "round";
-    for (let i = 0; i < 6; i += 1) {
-      const y = baseY - i * (4.15 + breathe * .05);
-      const radiusX = 14 - i * .65;
-      ctx.strokeStyle = "rgba(255,255,255,.92)";
-      ctx.lineWidth = 4.2;
+
+    const springGlow = ctx.createRadialGradient(p.x, baseY - 6, 1, p.x, baseY - 6, 25);
+    springGlow.addColorStop(0, "rgba(255,225,94,.34)");
+    springGlow.addColorStop(1, "rgba(255,225,94,0)");
+    ctx.fillStyle = springGlow;
+    ctx.beginPath();
+    ctx.ellipse(p.x, baseY - 6, 25, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const mount = ctx.createLinearGradient(p.x, baseY - 3, p.x, baseY + 3);
+    mount.addColorStop(0, "#fff0a1");
+    mount.addColorStop(.48, "#e9ad2f");
+    mount.addColorStop(1, "#b76b18");
+    ctx.fillStyle = mount;
+    ctx.strokeStyle = "#4b4037";
+    ctx.lineWidth = 1.8;
+    roundedRect(ctx, p.x - 17, baseY - 2.5, 34, 6, 3);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,249,207,.9)";
+    for (const boltX of [p.x - 11, p.x + 11]) {
       ctx.beginPath();
-      ctx.ellipse(p.x, y, radiusX, 2.25, 0, 0, Math.PI * 2);
+      ctx.arc(boltX, baseY + .25, 1.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const metal = ctx.createLinearGradient(p.x - 14, 0, p.x + 14, 0);
+    metal.addColorStop(0, "#7c848a");
+    metal.addColorStop(.2, "#f5f8f8");
+    metal.addColorStop(.48, "#aeb8bd");
+    metal.addColorStop(.72, "#ffffff");
+    metal.addColorStop(1, "#747c82");
+    for (let i = 0; i < turns; i += 1) {
+      const y = baseY - 2.5 - i * spacing;
+      const radiusX = 13.8 - i * .35;
+      ctx.strokeStyle = "#3f4244";
+      ctx.lineWidth = 4.4;
+      ctx.beginPath();
+      ctx.ellipse(p.x, y, radiusX, 2.05, 0, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.strokeStyle = "#373a3d";
-      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = metal;
+      ctx.lineWidth = 2.25;
       ctx.beginPath();
-      ctx.ellipse(p.x, y, radiusX, 2.25, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, y, radiusX, 2.05, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(255,255,255,.75)";
-    ctx.lineWidth = 1.2;
+
+    ctx.strokeStyle = "#3f4244";
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(p.x - 8, baseY - 1);
-    ctx.lineTo(p.x - 6, baseY - 20);
+    ctx.moveTo(p.x - 12, baseY - 2);
+    ctx.lineTo(p.x - 10.5, topY - 2.5);
+    ctx.moveTo(p.x + 12, baseY - 2);
+    ctx.lineTo(p.x + 10.5, topY - 2.5);
     ctx.stroke();
+    ctx.strokeStyle = metal;
+    ctx.lineWidth = 1.9;
+    ctx.stroke();
+
+    const topPad = ctx.createLinearGradient(p.x, topY - 6, p.x, topY);
+    topPad.addColorStop(0, "#f8fafb");
+    topPad.addColorStop(1, "#939da2");
+    ctx.fillStyle = topPad;
+    ctx.strokeStyle = "#3f4244";
+    ctx.lineWidth = 1.7;
+    roundedRect(ctx, p.x - 13.5, topY - 5.2, 27, 5.6, 2.8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.86)";
+    roundedRect(ctx, p.x - 9.5, topY - 4.3, 11, 1.4, .7);
+    ctx.fill();
     ctx.restore();
   }
   ctx.restore();
