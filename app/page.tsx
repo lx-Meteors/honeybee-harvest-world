@@ -310,42 +310,48 @@ function stopSynthBackgroundMusic() {
 
 function startSynthBackgroundMusic() {
   if (typeof window === "undefined" || synthMusicTimer !== null) return;
-  const melody = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23, 246.94, 329.63, 392, 493.88];
+  const melody = [
+    523.25, 0, 659.25, 783.99, 0, 659.25, 587.33, 0,
+    493.88, 0, 587.33, 783.99, 0, 587.33, 493.88, 0,
+    440, 0, 523.25, 659.25, 0, 523.25, 493.88, 0,
+    440, 0, 523.25, 698.46, 0, 659.25, 523.25, 0,
+  ];
   const playNote = () => {
     const audio = getGameAudioContext();
     if (!audio || audio.state !== "running") return;
     const now = audio.currentTime;
     const frequency = melody[synthMusicStep % melody.length];
     synthMusicStep += 1;
+    if (!frequency) return;
     const gain = audio.createGain();
     const lead = audio.createOscillator();
     const glow = audio.createOscillator();
     lead.type = "sine";
-    glow.type = "triangle";
+    glow.type = "sine";
     lead.frequency.value = frequency;
     glow.frequency.value = frequency / 2;
     gain.gain.setValueAtTime(.0001, now);
-    gain.gain.exponentialRampToValueAtTime(.014, now + .035);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + .38);
+    gain.gain.exponentialRampToValueAtTime(.009, now + .018);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + .54);
     lead.connect(gain);
     glow.connect(gain);
     gain.connect(audio.destination);
     lead.start(now);
     glow.start(now);
-    lead.stop(now + .4);
-    glow.stop(now + .4);
+    lead.stop(now + .56);
+    glow.stop(now + .56);
   };
   playNote();
-  synthMusicTimer = window.setInterval(playNote, 430);
+  synthMusicTimer = window.setInterval(playNote, 312.5);
 }
 
 function prepareBackgroundMusic() {
-  if (typeof window === "undefined" || !new Audio().canPlayType('audio/ogg; codecs="vorbis"')) return null;
+  if (typeof window === "undefined") return null;
   if (!backgroundMusic) {
-    backgroundMusic = new Audio("/sfx/background-music.ogg");
+    backgroundMusic = new Audio("/sfx/garden-flight-theme.wav?v=20260803");
     backgroundMusic.loop = true;
     backgroundMusic.preload = "auto";
-    backgroundMusic.volume = .14;
+    backgroundMusic.volume = .1;
     backgroundMusic.load();
   }
   return backgroundMusic;
