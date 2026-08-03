@@ -90,27 +90,41 @@ button { font: inherit; }
 
 .game-canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 
-.game-hud { position: absolute; z-index: 4; left: 14px; right: 14px; top: 13px; display: grid; grid-template-columns: minmax(128px, 1fr) 138px; align-items: center; gap: 10px; pointer-events: none; }
-.hud-pill { height: 45px; border: 1px solid rgba(255,255,255,.86); border-radius: 18px; background: linear-gradient(145deg,rgba(255,255,255,.96),rgba(255,248,218,.92)); display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 7px 18px rgba(70,78,50,.13), inset 0 1px 0 #fff; font-size: 15px; backdrop-filter: blur(8px); }
+.game-hud { position: absolute; z-index: 4; left: 14px; top: 13px; pointer-events: none; }
+.hud-pill { position: relative; display: flex; align-items: center; overflow: hidden; }
 .hud-pill > span:last-child { display: flex; flex-direction: column; line-height: 1.05; }
-.hud-pill small, .best-score small { color: #8d7757; font-size: 8px; font-weight: 900; letter-spacing: .08em; }
-.hud-pill b { color: #493626; font-size: 17px; font-weight: 950; }
-.hud-pill b i { margin-left: 1px; color: #9a8060; font-size: 10px; font-style: normal; }
-.score-pill { justify-content: flex-start; padding: 0 18px; background: linear-gradient(145deg,#fffdf1,#fff1b9); }
+.hud-pill small { color: #9a6c2d; font-size: 8px; font-weight: 950; letter-spacing: .12em; }
+.hud-pill b { margin-top: 2px; color: #4c301b; font-size: 20px; font-weight: 950; line-height: 1; }
+.score-pill {
+  width: 150px;
+  height: 49px;
+  justify-content: flex-start;
+  gap: 11px;
+  padding: 0 17px;
+  border: 1px solid rgba(255,255,255,.95);
+  border-radius: 19px;
+  background:
+    radial-gradient(circle at 18% 0, rgba(255,255,255,.9), transparent 38%),
+    linear-gradient(145deg,rgba(255,254,239,.98),rgba(255,235,154,.95));
+  box-shadow: 0 6px 0 rgba(186,121,21,.14), 0 10px 22px rgba(83,78,40,.15), inset 0 0 0 1px rgba(241,190,55,.23);
+  backdrop-filter: blur(9px);
+}
+.score-pill::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.85);
+  box-shadow: -7px 6px 0 -1px rgba(255,255,255,.38);
+}
+.score-pill .honey-drop { width: 20px; height: 23px; flex: 0 0 auto; filter: drop-shadow(0 3px 2px rgba(190,101,0,.16)); }
 .height-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: linear-gradient(180deg,#7bcaa2,#4da77c); box-shadow: 0 3px 8px rgba(66,145,105,.24); font-size: 16px; font-weight: 950; }
 .flower-pill { min-width: 0; }
 .distance-track { height: 9px; padding: 2px; background: rgba(255,255,255,.72); border-radius: 9px; overflow: hidden; }
 .distance-track span { height: 100%; display: block; border-radius: 8px; background: linear-gradient(90deg, #ffd233, #f49c17); transition: width .2s; }
-.best-score { justify-self: end; width: 138px; height: 41px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border: 1px solid rgba(255,255,255,.34); border-radius: 20px; background: linear-gradient(145deg,rgba(79,113,91,.9),rgba(53,81,65,.92)); color: #fff; white-space: nowrap; box-shadow: 0 7px 17px rgba(40,76,58,.2), inset 0 1px 0 rgba(255,255,255,.23); backdrop-filter: blur(9px); }
-.best-score > span:last-child { display: flex; flex-direction: column; line-height: 1; }
-.best-score small { color: rgba(255,255,255,.68); font-size: 7px; }
-.best-score b { margin-top: 2px; font-size: 15px; line-height: 1; }
-.power-hud { position: absolute; z-index: 4; top: 66px; right: 14px; pointer-events: none; }
-.ammo-chip { min-width: 92px; height: 27px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 10px; border: 1px solid rgba(255,255,255,.75); border-radius: 14px; background: rgba(56,78,61,.68); color: #ffe05a; box-shadow: 0 4px 12px rgba(48,67,50,.15); backdrop-filter: blur(7px); font-size: 10px; font-weight: 900; }
-.ammo-chip > span { font-size: 13px; }
-.ammo-chip i { width: 7px; height: 7px; border: 1px solid rgba(255,255,255,.55); border-radius: 50%; background: rgba(255,255,255,.18); }
-.ammo-chip i.loaded { background: #ffd42e; box-shadow: 0 0 6px #ffd42e; }
-.record-crown { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: #76531b; background: linear-gradient(180deg,#ffe887,#ffc431); box-shadow: 0 3px 8px rgba(37,52,40,.2); font-size: 14px; }
 .honey-drop { display: inline-block; width: 16px; height: 19px; background: linear-gradient(135deg,#ffe45e,#f29b0e); border-radius: 60% 45% 60% 55%; transform: rotate(45deg); box-shadow: inset -2px -2px 0 rgba(190,101,0,.18); }
 .honey-drop.large { width: 27px; height: 32px; margin-right: 12px; }
 

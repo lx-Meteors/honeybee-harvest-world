@@ -2634,9 +2634,7 @@ export default function Home() {
         <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
         <header className="game-hud" aria-live="polite">
           <div className="hud-pill score-pill"><span className="honey-drop" /><span><small>采蜜值</small><b>{stats.honey}</b></span></div>
-          <div className="best-score"><span className="record-crown">♛</span><span><small>最高纪录</small><b>{Math.max(best, stats.honey)}</b></span></div>
         </header>
-        {phase === "playing" && <div className="power-hud"><div className="ammo-chip" aria-label={`剩余${stats.ammo}发花粉弹`}><span>花粉弹 ✦</span>{Array.from({ length: 2 }, (_, i) => <i className={i < stats.ammo ? "loaded" : ""} key={i} />)}</div></div>}
 
         {phase === "menu" && <div className="game-overlay intro-overlay">
           <div className="cover-frame">
@@ -2684,8 +2682,8 @@ export default function Home() {
             </div>
           </div>
         </div>}
-        {phase === "playing" && controlMode === "touch" && <div className="touch-hint">按住拖动控制左右 · 轻点发射花粉弹</div>}
-        {phase === "playing" && controlMode === "motion" && <div className="touch-hint">晃动控制左右 · 轻点发射花粉弹</div>}
+        {phase === "playing" && controlMode === "touch" && <div className="touch-hint">按住拖动控制左右</div>}
+        {phase === "playing" && controlMode === "motion" && <div className="touch-hint">晃动控制左右</div>}
         {phase === "playing" && controlMode === "motion" && motionNotice && <div className={`motion-status${motionUnavailable ? " is-error" : ""}`}><span />{motionNotice}</div>}
       </section>
     </main>
