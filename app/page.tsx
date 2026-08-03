@@ -1520,27 +1520,31 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
     }
   }
   if (p.kind === "spring") {
-    const compress = Math.sin(time * .012 + p.id) * 1.3;
-    ctx.fillStyle = "#f7c833";
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2;
-    roundedRect(ctx, p.x - 15, sy - 13, 30, 6, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = "#565d65";
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    for (let i = 0; i <= 7; i += 1) {
-      const px = p.x - 10.5 + i * 3;
-      const py = sy - 10 - (i % 2 ? 11 + compress : 0);
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    const breathe = Math.sin(time * .009 + p.id) * .35;
+    const baseY = sy - 7;
+    ctx.save();
+    ctx.lineCap = "round";
+    for (let i = 0; i < 6; i += 1) {
+      const y = baseY - i * (4.15 + breathe * .05);
+      const radiusX = 14 - i * .65;
+      ctx.strokeStyle = "rgba(255,255,255,.92)";
+      ctx.lineWidth = 4.2;
+      ctx.beginPath();
+      ctx.ellipse(p.x, y, radiusX, 2.25, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "#373a3d";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.ellipse(p.x, y, radiusX, 2.25, 0, 0, Math.PI * 2);
+      ctx.stroke();
     }
+    ctx.strokeStyle = "rgba(255,255,255,.75)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(p.x - 8, baseY - 1);
+    ctx.lineTo(p.x - 6, baseY - 20);
     ctx.stroke();
-    ctx.fillStyle = "#f7c833";
-    ctx.strokeStyle = outline;
-    roundedRect(ctx, p.x - 13, sy - 25 - compress, 26, 6, 3);
-    ctx.fill();
-    ctx.stroke();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -2073,7 +2077,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   controlMode: ControlMode;
   resetToken: number;
   onStats: (honey: number, height: number, ammo: number) => void;
-  onFail: (honey: number, height: number) => void;
+  onFail: (honey: number) => void;
   onMotionDetected: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -2443,20 +2447,20 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
             state.ended = true;
             state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
             playGameSound("fail");
-            onFail(state.honey, heightMeters(state.highest));
+            onFail(state.honey);
             break;
           }
         } else if (item.kind === "blackHole") {
           state.ended = true;
           state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
           playGameSound("fail");
-          onFail(state.honey, heightMeters(state.highest));
+          onFail(state.honey);
           break;
         } else if (item.kind === "web") {
           state.ended = true;
           state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
           playGameSound("fail");
-          onFail(state.honey, heightMeters(state.highest));
+          onFail(state.honey);
           break;
         }
       }
@@ -2474,7 +2478,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       if (!state.ended && state.beeY < state.cameraY - 95) {
         state.ended = true;
         playGameSound("fail");
-        onFail(state.honey, heightMeters(state.highest));
+        onFail(state.honey);
       }
     };
 
@@ -2532,7 +2536,7 @@ export default function Home() {
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
   const [stats, setStats] = useState({ honey: 0, height: 0, ammo: 1 });
-  const [result, setResult] = useState({ honey: 0, height: 0 });
+  const [result, setResult] = useState({ honey: 0 });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
   const [motionNotice, setMotionNotice] = useState("");
@@ -2564,13 +2568,13 @@ export default function Home() {
   const onStats = useCallback((honey: number, height: number, ammo: number) => {
     setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.ammo === ammo ? old : { honey, height, ammo });
   }, []);
-  const onFail = useCallback((honey: number, height: number) => {
+  const onFail = useCallback((honey: number) => {
     if (finishLock.current) return;
     finishLock.current = true;
     const nextBest = Math.max(best, honey);
     setBest(nextBest);
     localStorage.setItem("honeybee-harvest-v3", String(nextBest));
-    setResult({ honey, height });
+    setResult({ honey });
     setPhase("failed");
   }, [best]);
   const startGame = () => {
@@ -2605,18 +2609,14 @@ export default function Home() {
         setMotionUnavailable(true);
         setMotionNotice("没有收到体感数据，请确认浏览器已允许动作与方向访问");
       }, 2600);
-    } catch (error) {
+    } catch {
       setBackgroundMusic(false);
-      const reason = error instanceof Error ? error.message : "unknown";
-      setMotionUnavailable(true);
-      setMotionNotice(reason === "secure-context"
-        ? "体感需要 HTTPS 安全链接，当前局域网 HTTP 地址无法读取手机传感器"
-        : reason === "denied"
-          ? "体感权限被拒绝，请在浏览器设置中允许动作与方向访问"
-          : "当前浏览器不支持体感，请更换 Safari 或 Chrome");
+      setMotionUnavailable(false);
+      setMotionNotice("");
+      setControlMode("touch");
+      startGame();
     }
   };
-  const playTouch = () => { setMotionUnavailable(false); setMotionNotice(""); setControlMode("touch"); startGame(); };
 
   return (
     <main className="page-shell">
@@ -2649,16 +2649,16 @@ export default function Home() {
               <div className="cover-bee" />
             </div>
             <div className="cover-title">
-              <small>向上飞 · 带蜂蜜回家</small>
               <h2>小蜜蜂<br /><em>采蜜世界</em></h2>
-              <p>晃动手机控制方向，踩着花朵不断向上飞跃。</p>
             </div>
             <div className="cover-actions">
-              <button className="cover-primary" onClick={requestMotion}>开始体感采蜜</button>
-              <button className="cover-secondary" onClick={playTouch}>使用触屏试玩</button>
+              <button className="cover-primary" onClick={requestMotion}>开始采蜜</button>
             </div>
             <p className="cover-footnote">左右晃动控制方向 · 小蜜蜂自动飞跃</p>
-            {motionNotice && <p className={`permission-note${motionUnavailable ? " is-error" : ""}`}>{motionNotice}</p>}
+            <button className="leaderboard-button" type="button" data-leaderboard-entry aria-label="排行榜">
+              <span aria-hidden="true">♛</span>
+              <small>排行榜</small>
+            </button>
           </div>
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
@@ -2669,7 +2669,6 @@ export default function Home() {
               <div className="result-bee" />
               <span>{result.honey >= best ? "★" : "🍯"}</span>
             </div>
-            <div className="result-plaque">本次采蜜飞行记录</div>
             <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
             <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
             <div className="result-main-score">
@@ -2678,9 +2677,7 @@ export default function Home() {
             </div>
             <div className="result-stats">
               <div><small>最高纪录</small><strong>{best}</strong></div>
-              <div><small>飞行高度</small><strong>{Math.floor(result.height)}<i>m</i></strong></div>
             </div>
-            <div className="result-ranking"><i />采蜜值越高，花园排名越靠前<i /></div>
             <div className="result-actions">
               <button className="result-secondary" onClick={() => setPhase("menu")}>返回花园</button>
               <button className="result-primary" onClick={startGame}>再飞一次</button>
