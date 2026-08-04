@@ -103,6 +103,7 @@ const SFX_VOLUME = .66;
 
 let sharedAudioContext: AudioContext | null = null;
 let activeBearDangerLoop: HTMLAudioElement | null = null;
+let activeBlackHoleLoop: HTMLAudioElement | null = null;
 let bearSynthTimer: number | null = null;
 let backgroundMusic: HTMLAudioElement | null = null;
 let synthMusicTimer: number | null = null;
@@ -121,9 +122,9 @@ const SOUND_FILES: Partial<Record<SoundKind, string>> = {
   hit: "/sfx/hit.ogg",
   fail: "/sfx/fail.ogg",
   empty: "/sfx/empty.ogg",
-  bearWarning: "/sfx/monster-warning.ogg",
+  bearWarning: "/sfx/monster-warning-v2.wav?v=20260804",
   webWind: "/sfx/web-wind.ogg",
-  blackHole: "/sfx/black-hole.ogg",
+  blackHole: "/sfx/black-hole-v2.wav?v=20260804",
 };
 const SOUND_MIX: Partial<Record<SoundKind, number>> = {
   bounce: .58,
@@ -303,11 +304,7 @@ function startBearSynthLoop() {
 function setBearDangerSound(active: boolean) {
   if (!active && !activeBearDangerLoop && bearSynthTimer === null) return;
   if (active && !activeBearDangerLoop && typeof window !== "undefined") {
-    if (!new Audio().canPlayType('audio/ogg; codecs="vorbis"')) {
-      startBearSynthLoop();
-      return;
-    }
-    const loop = new Audio("/sfx/monster-warning.ogg");
+    const loop = new Audio("/sfx/monster-warning-v2.wav?v=20260804");
     loop.loop = true;
     loop.preload = "auto";
     loop.volume = SFX_VOLUME * .68;
@@ -320,6 +317,22 @@ function setBearDangerSound(active: boolean) {
     stopBearSynthLoop();
   } else if (!active) {
     stopBearSynthLoop();
+  }
+}
+
+function setBlackHoleDangerSound(active: boolean) {
+  if (!active && !activeBlackHoleLoop) return;
+  if (active && !activeBlackHoleLoop && typeof window !== "undefined") {
+    const loop = new Audio("/sfx/black-hole-v2.wav?v=20260804");
+    loop.loop = true;
+    loop.preload = "auto";
+    loop.volume = SFX_VOLUME * .68;
+    void loop.play().catch(() => playSynthSound("blackHole"));
+    activeBlackHoleLoop = loop;
+  } else if (!active && activeBlackHoleLoop) {
+    activeBlackHoleLoop.pause();
+    activeBlackHoleLoop.currentTime = 0;
+    activeBlackHoleLoop = null;
   }
 }
 
@@ -369,10 +382,10 @@ function startSynthBackgroundMusic() {
 function prepareBackgroundMusic() {
   if (typeof window === "undefined") return null;
   if (!backgroundMusic) {
-    backgroundMusic = new Audio("/sfx/garden-flight-theme.wav?v=20260803");
+    backgroundMusic = new Audio("/sfx/flowerbed-fields.ogg?v=20260804");
     backgroundMusic.loop = true;
     backgroundMusic.preload = "auto";
-    backgroundMusic.volume = .1;
+    backgroundMusic.volume = .085;
     backgroundMusic.load();
   }
   return backgroundMusic;
@@ -2273,7 +2286,10 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   useEffect(() => {
     phaseRef.current = phase;
     stateRef.current.lastTime = 0;
-    if (phase !== "playing") setBearDangerSound(false);
+    if (phase !== "playing") {
+      setBearDangerSound(false);
+      setBlackHoleDangerSound(false);
+    }
   }, [phase]);
   useEffect(() => {
     stateRef.current = firstState();
@@ -2487,7 +2503,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           playGameSound("webWind");
         } else if (!item.used && !item.audioPlayed && item.kind === "blackHole" && sy > -100 && sy < 100) {
           item.audioPlayed = true;
-          playGameSound("blackHole");
         }
       }
       const bearDangerActive = state.airItems.some((item) => {
@@ -2497,6 +2512,13 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         return sy > -215 && sy < HEIGHT + 70 && notSafelyPassed;
       });
       setBearDangerSound(bearDangerActive);
+      const blackHoleDangerActive = state.airItems.some((item) => {
+        if (item.used || item.kind !== "blackHole") return false;
+        const sy = screenY(item.y, state.cameraY);
+        const notSafelyPassed = item.y > state.beeY - 110;
+        return sy > -150 && sy < HEIGHT + 80 && notSafelyPassed;
+      });
+      setBlackHoleDangerSound(blackHoleDangerActive);
       const now = state.lastTime / 1000;
       for (const p of state.platforms) {
         if ((p.kind === "moving" || p.kind === "cloud") && p.baseX !== undefined) {
@@ -2710,6 +2732,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     return () => {
       cancelAnimationFrame(frameRef.current);
       setBearDangerSound(false);
+      setBlackHoleDangerSound(false);
     };
   }, [controlMode, onFail, onStats, resetToken]);
 
