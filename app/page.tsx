@@ -114,7 +114,6 @@ const SOUND_FILES: Partial<Record<SoundKind, string>> = {
   break: "/sfx/break.ogg",
   honey: "/sfx/honey.ogg",
   rocket: "/sfx/rocket.ogg",
-  copter: "/sfx/copter.ogg",
   shoot: "/sfx/shoot.ogg",
   hit: "/sfx/hit.ogg",
   fail: "/sfx/fail.ogg",
@@ -247,6 +246,13 @@ function playSynthSound(kind: SoundKind) {
     noise(1.05, "lowpass", 420, 1250, .052, 0, .08);
     tone(72, 185, .7, "sawtooth", .024);
     tone(118, 270, .58, "triangle", .018, .08);
+  } else if (kind === "copter") {
+    // A soft bamboo-whirl cue: airy lift plus two light wooden chimes.
+    // It deliberately avoids the harsh, repeating motor texture of the old recording.
+    noise(.9, "bandpass", 620, 1280, .018, 0, .16);
+    tone(330, 440, .38, "sine", .018, .02);
+    tone(440, 587, .48, "sine", .013, .2);
+    tone(660, 780, .22, "triangle", .008, .48);
   } else if (kind === "shoot") {
     noise(.09, "highpass", 2200, 680, .025, 0, .005);
     tone(690, 280, .1, "triangle", .028);
