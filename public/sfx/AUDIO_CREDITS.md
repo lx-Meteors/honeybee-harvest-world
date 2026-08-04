@@ -1,5 +1,4 @@
-# Audio credits
+# Audio provenance
 
-- `flowerbed-fields.ogg`: “Flowerbed Fields [Loop]” by Zane Little Music, released under CC0. Source: https://opengameart.org/content/flowerbed-fields-loop
+- `ai-honey-garden-theme-v1.wav`: original AI-composed and procedurally synthesized background loop created exclusively for 小蜜蜂采蜜世界 by `scripts/generate_ai_honey_garden_bgm.py`. It contains no samples, copied melody, or third-party recording.
 - `monster-warning-v2.wav` and `black-hole-v2.wav`: original procedural sound effects generated for 小蜜蜂采蜜世界 by `scripts/generate_game_audio.py`.
-

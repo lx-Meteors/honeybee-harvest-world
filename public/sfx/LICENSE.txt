@@ -13,12 +13,7 @@ Attribution is not required. This file is retained to document provenance.
 
 Background music:
 
-- "Garden Flight" original game loop
-- Generated locally by scripts/generate_garden_bgm.py
-- Original work created for this project
-
-Legacy, currently unused background loop:
-
-- "Swinging Sweet" by hernandack
-- Source: https://opengameart.org/content/short-loops-background-music-pack
-- License: Creative Commons Zero (CC0 1.0)
+- "Honey Garden Flight v1" original AI-composed game loop
+- Generated locally by scripts/generate_ai_honey_garden_bgm.py
+- Original melody, harmony, arrangement, and synthesized timbres created exclusively for this project
+- Contains no third-party samples or source recordings

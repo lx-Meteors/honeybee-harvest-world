@@ -1,0 +1,21 @@
+# Generated asset prompts — 2026-08-04
+
+Mode: built-in `image_gen`, use case `stylized-concept`.
+
+Reference image role: style reference only for the polished cheerful 3D candy-toy game art, rounded forms, glossy materials, and golden-pink garden palette.
+
+## Silver bamboo copter
+
+> Use case: stylized-concept. Asset type: transparent 2D canvas mobile-game power-up sprite. Input image: style reference only for the polished cheerful 3D candy-toy game art, rounded forms, glossy materials, and golden-pink garden palette. Create one isolated bamboo-copter power-up redesigned with SILVER WINGS: a compact two-blade rotor with two broad, rounded, mirror-symmetrical polished silver metal wings, bright white edge highlights, a small warm golden central hub, and a short elegant honey-colored handle below. It must look magical, premium, friendly, and safe—not mechanical or threatening. Front three-quarter view, horizontal readable silhouette, legible at 50px wide, centered with generous padding. No bee, no flower, no motion blur, no text, no watermark, no cast shadow. Place it on a perfectly flat solid #FF00FF chroma-key background with no gradient, texture, floor, reflection, or lighting variation. Do not use #FF00FF anywhere in the object.
+
+## Golden-wing rocket
+
+> Use case: stylized-concept. Asset type: transparent 2D canvas mobile-game rocket power-up sprite. Input image: style reference only for the polished cheerful 3D candy-toy game art, rounded forms, glossy materials, and golden-pink garden palette. Create one isolated charming bee-garden rocket with a compact ivory-and-honey-gold body, a rounded honeycomb-shaped amber window, and two prominent swept GOLDEN WINGS on the left and right. Add a small golden bee-stripe motif and a soft orange nozzle at the bottom, but no exhaust flame. It must look valuable, magical, and clearly beneficial. Upright front three-quarter view, symmetrical, strong readable silhouette at 58px tall, centered with generous padding. No bee character, no flower, no text, no watermark, no cast shadow. Place it on a perfectly flat solid #00FFFF chroma-key background with no gradient, texture, floor, reflection, or lighting variation. Do not use #00FFFF anywhere in the object.
+
+## Villain mantis
+
+> Use case: stylized-concept. Asset type: transparent 2D canvas mobile-game enemy sprite. Input image: style reference only for the polished 3D candy-toy game art and rounded glossy rendering. Create one isolated villainous praying mantis, immediately readable as a bee predator and bad character: vivid leaf-green armor-like body, large triangular head, narrow angry red-orange eyes under sharply lowered brows, a crooked hostile grin, and two oversized raised serrated scythe forelegs ready to strike. Give it a hunched stalking pose and darker emerald accents, but keep it cute enough for a family mobile game—no gore, no horror. Front three-quarter view facing slightly left, compact crisp silhouette, legible at 64px tall, centered with generous padding. No bee, no flower, no text, no watermark, no cast shadow. Place it on a perfectly flat solid #FF00FF chroma-key background with no gradient, texture, floor, reflection, or lighting variation. Do not use #FF00FF anywhere in the mantis.
+
+## Villain hornet
+
+> Use case: stylized-concept. Asset type: transparent 2D canvas mobile-game enemy sprite. Input image: style reference only for the polished 3D candy-toy game art and rounded glossy rendering. Create one isolated unmistakably villainous hornet, clearly different from the friendly player bee: lean black-and-deep-gold striped armored body, pointed abdomen with a visible dark stinger, angular translucent wings, large clenched fists, narrow angry red-orange eyes under sharply lowered brows, and a small aggressive sneer. Add dark burgundy accents and a forward-charging pose to communicate danger instantly, while remaining suitable for a cute family mobile game—no gore, no horror. Front three-quarter view facing slightly right, compact crisp silhouette, legible at 62px wide, centered with generous padding. No friendly smile, no flower, no text, no watermark, no cast shadow. Place it on a perfectly flat solid #FF00FF chroma-key background with no gradient, texture, floor, reflection, or lighting variation. Do not use #FF00FF anywhere in the hornet.

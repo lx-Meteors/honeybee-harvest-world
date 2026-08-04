@@ -395,7 +395,7 @@ function startSynthBackgroundMusic() {
 function prepareBackgroundMusic() {
   if (typeof window === "undefined") return null;
   if (!backgroundMusic) {
-    backgroundMusic = new Audio("/sfx/flowerbed-fields.ogg?v=20260804");
+    backgroundMusic = new Audio("/sfx/ai-honey-garden-theme-v1.wav?v=20260804a");
     backgroundMusic.loop = true;
     backgroundMusic.preload = "auto";
     backgroundMusic.volume = MUSIC_VOLUME;
@@ -2008,9 +2008,29 @@ function drawBat(ctx: CanvasRenderingContext2D, x: number, y: number, time: numb
   ctx.restore();
 }
 
-function drawBambooCopter(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, attached = false) {
+function drawBambooCopter(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  time: number,
+  attached = false,
+  image: HTMLImageElement | null = null,
+) {
   ctx.save();
   ctx.translate(x, y + (attached ? -39 : Math.sin(time * .009) * 3));
+  if (image) {
+    const width = attached ? 66 : 61;
+    const height = width * (image.naturalHeight / image.naturalWidth);
+    const shimmer = .96 + Math.sin(time * .026) * .04;
+    ctx.scale(shimmer, 1);
+    ctx.rotate(Math.sin(time * .018) * .055);
+    ctx.shadowColor = "rgba(255,215,70,.34)";
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 3;
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return;
+  }
   ctx.strokeStyle = "#49392c";
   ctx.lineWidth = 3;
   ctx.beginPath();
@@ -2033,9 +2053,33 @@ function drawBambooCopter(ctx: CanvasRenderingContext2D, x: number, y: number, t
   ctx.restore();
 }
 
-function drawRocket(ctx: CanvasRenderingContext2D, x: number, y: number, time: number) {
+function drawRocket(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  time: number,
+  image: HTMLImageElement | null = null,
+) {
   ctx.save();
   ctx.translate(x, y + Math.sin(time * 0.006) * 4);
+  if (image) {
+    const glow = ctx.createRadialGradient(0, 4, 2, 0, 4, 42);
+    glow.addColorStop(0, "rgba(255,222,88,.42)");
+    glow.addColorStop(1, "rgba(255,177,28,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 4, 42, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.rotate(Math.sin(time * .008) * .035);
+    const height = 73;
+    const width = height * (image.naturalWidth / image.naturalHeight);
+    ctx.shadowColor = "rgba(104,67,20,.24)";
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 4;
+    ctx.drawImage(image, -width / 2, -height / 2, width, height);
+    ctx.restore();
+    return;
+  }
   ctx.rotate(0.18);
   ctx.fillStyle = "#fff8dc";
   ctx.strokeStyle = "#493a30";
@@ -2472,9 +2516,10 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   const phaseRef = useRef(phase);
   const frameRef = useRef(0);
   const beeImageRef = useRef<HTMLImageElement | null>(null);
-  const redMonsterImageRef = useRef<HTMLImageElement | null>(null);
-  const purpleMonsterImageRef = useRef<HTMLImageElement | null>(null);
-  const blueMonsterImageRef = useRef<HTMLImageElement | null>(null);
+  const mantisEnemyImageRef = useRef<HTMLImageElement | null>(null);
+  const hornetEnemyImageRef = useRef<HTMLImageElement | null>(null);
+  const rocketImageRef = useRef<HTMLImageElement | null>(null);
+  const bambooCopterImageRef = useRef<HTMLImageElement | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
   const flowerPlatformImageRef = useRef<HTMLImageElement | null>(null);
   const springFlowerImageRef = useRef<HTMLImageElement | null>(null);
@@ -2499,9 +2544,10 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   }, [resetToken]);
   useEffect(() => {
     const beeImage = new Image();
-    const redMonsterImage = new Image();
-    const purpleMonsterImage = new Image();
-    const blueMonsterImage = new Image();
+    const mantisEnemyImage = new Image();
+    const hornetEnemyImage = new Image();
+    const rocketImage = new Image();
+    const bambooCopterImage = new Image();
     const backgroundImage = new Image();
     const flowerPlatformImage = new Image();
     const springFlowerImage = new Image();
@@ -2513,30 +2559,37 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     beeImage.fetchPriority = "high";
     beeImage.onload = markBeeReady;
     beeImage.src = "/bee-character-flying-final-v2.png?v=20260731";
-    redMonsterImage.src = "/monster-red-fuzz.png?v=20260730b";
-    purpleMonsterImage.src = "/monster-purple-jelly.png?v=20260730b";
-    blueMonsterImage.src = "/monster-blue-cyclops.png?v=20260730b";
+    mantisEnemyImage.src = "/enemy-mantis-v1.png?v=20260804";
+    hornetEnemyImage.src = "/enemy-hornet-v1.png?v=20260804";
+    rocketImage.src = "/rocket-gold-wings-v1.png?v=20260804";
+    bambooCopterImage.src = "/bamboo-copter-silver-v1.png?v=20260804";
     backgroundImage.src = "/game-background-long.png";
     flowerPlatformImage.src = "/flower-platform-3d-v1.png?v=20260804";
     springFlowerImage.src = "/spring-flower-3d-v1.png?v=20260804";
     honeyJarImage.src = "/honey-jar-3d-v1.png?v=20260804";
     if (beeImage.complete) markBeeReady();
     void beeImage.decode().then(markBeeReady).catch(() => undefined);
-    redMonsterImage.onload = () => { redMonsterImageRef.current = redMonsterImage; };
-    purpleMonsterImage.onload = () => { purpleMonsterImageRef.current = purpleMonsterImage; };
-    blueMonsterImage.onload = () => { blueMonsterImageRef.current = blueMonsterImage; };
+    mantisEnemyImage.onload = () => { mantisEnemyImageRef.current = mantisEnemyImage; };
+    hornetEnemyImage.onload = () => { hornetEnemyImageRef.current = hornetEnemyImage; };
+    rocketImage.onload = () => { rocketImageRef.current = rocketImage; };
+    bambooCopterImage.onload = () => { bambooCopterImageRef.current = bambooCopterImage; };
     backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
     flowerPlatformImage.onload = () => { flowerPlatformImageRef.current = flowerPlatformImage; };
     springFlowerImage.onload = () => { springFlowerImageRef.current = springFlowerImage; };
     honeyJarImage.onload = () => { honeyJarImageRef.current = honeyJarImage; };
+    if (mantisEnemyImage.complete && mantisEnemyImage.naturalWidth > 0) mantisEnemyImageRef.current = mantisEnemyImage;
+    if (hornetEnemyImage.complete && hornetEnemyImage.naturalWidth > 0) hornetEnemyImageRef.current = hornetEnemyImage;
+    if (rocketImage.complete && rocketImage.naturalWidth > 0) rocketImageRef.current = rocketImage;
+    if (bambooCopterImage.complete && bambooCopterImage.naturalWidth > 0) bambooCopterImageRef.current = bambooCopterImage;
     if (flowerPlatformImage.complete && flowerPlatformImage.naturalWidth > 0) flowerPlatformImageRef.current = flowerPlatformImage;
     if (springFlowerImage.complete && springFlowerImage.naturalWidth > 0) springFlowerImageRef.current = springFlowerImage;
     if (honeyJarImage.complete && honeyJarImage.naturalWidth > 0) honeyJarImageRef.current = honeyJarImage;
     return () => {
       beeImageRef.current = null;
-      redMonsterImageRef.current = null;
-      purpleMonsterImageRef.current = null;
-      blueMonsterImageRef.current = null;
+      mantisEnemyImageRef.current = null;
+      hornetEnemyImageRef.current = null;
+      rocketImageRef.current = null;
+      bambooCopterImageRef.current = null;
       backgroundImageRef.current = null;
       flowerPlatformImageRef.current = null;
       springFlowerImageRef.current = null;
@@ -2641,24 +2694,24 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         const sy = screenY(item.y, state.cameraY);
         if (sy < -70 || sy > HEIGHT + 70) continue;
         if (item.kind === "bear") {
-          const redMonsterImage = redMonsterImageRef.current;
-          if (redMonsterImage) drawDoodleMonsterSprite(ctx, redMonsterImage, item.x, sy, time, 60);
+          const mantisEnemyImage = mantisEnemyImageRef.current;
+          if (mantisEnemyImage) drawDoodleMonsterSprite(ctx, mantisEnemyImage, item.x, sy, time, 67);
           else drawRedFuzzFallback(ctx, item.x, sy, time);
         }
         else if (item.kind === "web") drawWeb(ctx, item.x, sy, time);
         else if (item.kind === "blackHole") drawBlackHole(ctx, item.x, sy, time);
         else if (item.kind === "hornet") {
-          const purpleMonsterImage = purpleMonsterImageRef.current;
-          if (purpleMonsterImage) drawDoodleMonsterSprite(ctx, purpleMonsterImage, item.x, sy, time, 58);
+          const hornetEnemyImage = hornetEnemyImageRef.current;
+          if (hornetEnemyImage) drawDoodleMonsterSprite(ctx, hornetEnemyImage, item.x, sy, time, 63);
           else drawHornet(ctx, item.x, sy, time);
         }
         else if (item.kind === "bat") {
-          const blueMonsterImage = blueMonsterImageRef.current;
-          if (blueMonsterImage) drawDoodleMonsterSprite(ctx, blueMonsterImage, item.x, sy, time, 60);
+          const hornetEnemyImage = hornetEnemyImageRef.current;
+          if (hornetEnemyImage) drawDoodleMonsterSprite(ctx, hornetEnemyImage, item.x, sy, time, 58);
           else drawBat(ctx, item.x, sy, time);
         }
-        else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time);
-        else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time);
+        else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time, rocketImageRef.current);
+        else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time, false, bambooCopterImageRef.current);
         else if (item.kind === "waxShield") drawWaxShield(ctx, item.x, sy, time);
         else drawHoneyJar(ctx, item.x, sy, time, honeyJarImageRef.current);
       }
@@ -2699,7 +2752,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         ctx.restore();
       }
       if (state.shield > 0) drawWaxShield(ctx, state.beeX, beeY - 2, time, true);
-      if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true);
+      if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true, bambooCopterImageRef.current);
     };
 
     const update = (state: GameState, dt: number) => {
