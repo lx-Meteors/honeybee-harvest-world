@@ -1174,10 +1174,13 @@ function generateWorld(state: GameState, targetY: number) {
     // 4 moving-board pocket. Never repeat a sparse pocket directly.
     const profileRoll = Math.random();
     let profile = 1;
+    // The opening must teach steering before asking for precision. Sparse and
+    // edge-biased fields therefore unlock gradually instead of being selected
+    // by the global difficulty value during the first few hundred points.
     if (profileRoll < .27 - difficulty * .1) profile = 0;
-    else if (meters > 900 && profileRoll < .38 + difficulty * .08) profile = 2;
-    else if (meters > 900 && profileRoll < .5 + difficulty * .08) profile = 3;
-    else if (meters > 700 && profileRoll < .66 + difficulty * .08) profile = 4;
+    else if (meters > 1500 && profileRoll < .38 + difficulty * .08) profile = 2;
+    else if (meters > 1100 && profileRoll < .5 + difficulty * .08) profile = 3;
+    else if (meters > 800 && profileRoll < .66 + difficulty * .08) profile = 4;
     if (profile === 2 && state.routePattern === 2) profile = Math.random() < .5 ? 0 : 1;
     state.routePattern = profile;
 
@@ -1234,11 +1237,18 @@ function generateWorld(state: GameState, targetY: number) {
     }
 
     const reachableNow = () => reachablePlatforms(supports, field, difficulty);
-    const profileGapScale = profile === 0 ? .76 : profile === 2 ? 1.2 : profile === 3 ? 1.04 : profile === 4 ? .94 : 1;
-    const baseGapMin = (50 + difficulty * 70) * profileGapScale;
-    const baseGapMax = (72 + difficulty * 94) * profileGapScale;
+    // Route geometry uses its own slow, continuous ramp. At 277 points the
+    // player is still in the generous opening band; the largest gaps only
+    // arrive after several thousand points.
+    const routeProgress = clampNumber(meters / 3200, 0, 1);
+    const profileGapScale = profile === 0 ? .8 : profile === 2 ? 1.08 : profile === 3 ? 1.02 : profile === 4 ? .94 : 1;
+    const baseGapMin = (46 + routeProgress * 48) * profileGapScale;
+    const baseGapMax = (66 + routeProgress * 76) * profileGapScale;
+    const platformWidthMin = 86 - routeProgress * 29;
+    const platformWidthMax = 98 - routeProgress * 19;
+    const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.04 : 1);
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
-    let generatedCount = 0;
+    let mainCount = 0;
 
     const randomScatterX = () => {
       if (profile === 3 && Math.random() < .78) {
@@ -1248,16 +1258,19 @@ function generateWorld(state: GameState, targetY: number) {
       return randomBetween(34, WIDTH - 34);
     };
 
-    while (y < segmentTop - 46 && generatedCount < 22) {
+    // Only progression platforms count toward this guard. Previously branch
+    // and broken decorations consumed the same limit, ending generation early
+    // and leaving the rest of a segment as an impossible empty screen.
+    while (y < segmentTop - 46 && mainCount < 30) {
       const reachable = reachableNow();
       const sourcePool = reachable.filter((platform) => {
         const gap = y - platform.y;
         return gap > 34 && gap < 284;
       });
       const width = clampNumber(
-        randomBetween(76, 92) - difficulty * randomBetween(14, 25) + (profile === 0 ? 4 : 0),
+        randomBetween(platformWidthMin, platformWidthMax) + (profile === 0 ? 4 : 0),
         54,
-        96,
+        102,
       );
       let x = randomScatterX();
       let placed = false;
@@ -1265,7 +1278,7 @@ function generateWorld(state: GameState, targetY: number) {
       for (let tries = 0; tries < 34; tries += 1) {
         const candidate: Platform = { id: -1, x, y, width, kind: "flower", used: false, breaking: 0 };
         const hasEntrance = sourcePool.some((source) => canJumpBetween(source, candidate, difficulty));
-        const doesNotTraceLast = generatedCount < 2 || Math.abs(x - state.lastPlatformX) > 28 || tries > 14;
+        const doesNotTraceLast = mainCount < 2 || Math.abs(x - state.lastPlatformX) > 28 || tries > 14;
         if (hasEntrance && doesNotTraceLast && !platformPlacementOverlaps(field, x, y, width)) {
           placed = true;
           break;
@@ -1288,7 +1301,7 @@ function generateWorld(state: GameState, targetY: number) {
       if (!placed) {
         const highest = [...reachable].sort((a, b) => b.y - a.y)[0];
         if (!highest) break;
-        y = highest.y + Math.min(190, randomBetween(92, 138));
+        y = highest.y + randomBetween(maxRouteGap * .72, maxRouteGap * .92);
         continue;
       }
 
@@ -1309,13 +1322,13 @@ function generateWorld(state: GameState, targetY: number) {
       }
       const main = pushPlatform(x, y, width, kind);
       state.lastPlatformX = main.x;
-      generatedCount += 1;
+      mainCount += 1;
 
       // Alternate landing points are offset in both axes, never visually stacked.
       const branchChance = profile === 0
-        ? .48 - difficulty * .2
+        ? .58 - routeProgress * .22
         : profile === 2 ? .08
-          : .3 - difficulty * .15;
+          : .42 - routeProgress * .2;
       if (Math.random() < branchChance) {
         const branchY = y + randomBetween(38, 74);
         const branchWidth = clampNumber(width + randomBetween(-10, 6), 52, 92);
@@ -1334,7 +1347,6 @@ function generateWorld(state: GameState, targetY: number) {
           ) {
             const branchMoving = meters > 650 && profile === 4 && Math.random() < .38;
             pushPlatform(branchX, branchY, branchWidth, branchMoving ? "moving" : "flower");
-            generatedCount += 1;
             break;
           }
         }
@@ -1349,7 +1361,6 @@ function generateWorld(state: GameState, targetY: number) {
           const brokenY = y + randomBetween(-44, 66);
           if (!platformPlacementOverlaps(field, brokenX, brokenY, brokenWidth)) {
             pushPlatform(brokenX, brokenY, brokenWidth, "broken");
-            generatedCount += 1;
             break;
           }
         }
@@ -1358,21 +1369,47 @@ function generateWorld(state: GameState, targetY: number) {
       let nextGap = randomBetween(baseGapMin, baseGapMax);
       if (profile === 0 && Math.random() < .32) nextGap *= randomBetween(.65, .82);
       if (profile === 2 && Math.random() < .42) nextGap *= randomBetween(1.08, 1.22);
-      y += clampNumber(nextGap, 42, 202);
+      y += clampNumber(nextGap, 42, maxRouteGap);
     }
 
+    // Audit the upper end of every segment. Keep inserting reachable solid
+    // landings until no unplayable blank band remains. This also makes segment
+    // boundaries invisible to the player instead of producing random cliffs.
     let reachable = reachableNow();
-    const highestReachable = Math.max(...reachable.map((platform) => platform.y));
-    if (highestReachable < segmentTop - 150) {
-      const topY = Math.min(segmentTop - 64, highestReachable + randomBetween(92, 154));
-      const sources = reachable.filter((platform) => topY - platform.y > 34 && topY - platform.y < 284);
-      const source = sources[Math.floor(Math.random() * sources.length)];
-      if (source) {
-        const topWidth = clampNumber(randomBetween(66, 84) - difficulty * 12, 54, 84);
-        const reach = horizontalReachForGap(topY - source.y, difficulty) * .76;
-        const topX = clampNumber(source.x + randomBetween(-reach, reach), topWidth / 2 + 7, WIDTH - topWidth / 2 - 7);
-        pushPlatform(topX, topY, topWidth, "flower");
+    const coverageTargetY = segmentTop - 42;
+    for (let guard = 0; guard < 18; guard += 1) {
+      const source = [...reachable].sort((a, b) => b.y - a.y)[0];
+      if (!source || coverageTargetY - source.y <= maxRouteGap) break;
+
+      const remaining = coverageTargetY - source.y;
+      const bridgeGap = Math.min(
+        remaining,
+        randomBetween(maxRouteGap * .7, maxRouteGap * .88),
+      );
+      const bridgeY = source.y + bridgeGap;
+      const bridgeWidth = clampNumber(
+        randomBetween(platformWidthMin, platformWidthMax),
+        56,
+        100,
+      );
+      const reach = horizontalReachForGap(bridgeGap, difficulty) * .68;
+      let placed = false;
+
+      for (let tries = 0; tries < 28; tries += 1) {
+        const bridgeX = clampNumber(
+          source.x + randomBetween(-reach, reach),
+          bridgeWidth / 2 + 7,
+          WIDTH - bridgeWidth / 2 - 7,
+        );
+        if (!platformPlacementOverlaps(field, bridgeX, bridgeY, bridgeWidth)) {
+          pushPlatform(bridgeX, bridgeY, bridgeWidth, "flower");
+          placed = true;
+          break;
+        }
       }
+
+      if (!placed) break;
+      reachable = reachableNow();
     }
 
     reachable = reachableNow();
