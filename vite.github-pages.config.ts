@@ -22,6 +22,8 @@ function rewritePublicAssetPaths(): Plugin {
             .replaceAll('"/bamboo-copter-', `"${publicBase}bamboo-copter-`)
             .replaceAll('"/flower-platform-', `"${publicBase}flower-platform-`)
             .replaceAll('"/spring-flower-', `"${publicBase}spring-flower-`)
+            .replaceAll('"/broken-flower-', `"${publicBase}broken-flower-`)
+            .replaceAll('"/fading-flower-', `"${publicBase}fading-flower-`)
             .replaceAll('"/honey-jar-', `"${publicBase}honey-jar-`)
             .replaceAll('"/game-background-long.png"', `"${publicBase}game-background-long.png"`),
           map: null,

@@ -517,8 +517,8 @@ function linearDifficultyAtHeight(meters: number) {
 
 function platformPlacementOverlaps(platforms: Platform[], x: number, y: number, width: number) {
   return platforms.some((platform) => (
-    Math.abs(platform.y - y) < 34
-    && Math.abs(platform.x - x) < (platform.width + width) / 2 + 22
+    Math.abs(platform.y - y) < 50
+    && Math.abs(platform.x - x) < (platform.width + width) / 2 + 18
   ));
 }
 
@@ -1249,9 +1249,9 @@ function generateWorld(state: GameState, targetY: number) {
     // player is still in the generous opening band; the largest gaps only
     // arrive after several thousand points.
     const routeProgress = clampNumber(meters / 3200, 0, 1);
-    const profileGapScale = profile === 0 ? .8 : profile === 2 ? 1.08 : profile === 3 ? 1.02 : profile === 4 ? .94 : 1;
-    const baseGapMin = (46 + routeProgress * 48) * profileGapScale;
-    const baseGapMax = (66 + routeProgress * 76) * profileGapScale;
+    const profileGapScale = profile === 0 ? .9 : profile === 2 ? 1.06 : profile === 3 ? 1.02 : profile === 4 ? .96 : 1;
+    const baseGapMin = (64 + routeProgress * 42) * profileGapScale;
+    const baseGapMax = (88 + routeProgress * 66) * profileGapScale;
     const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.04 : 1);
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
     let mainCount = 0;
@@ -1328,11 +1328,11 @@ function generateWorld(state: GameState, targetY: number) {
 
       // Alternate landing points are offset in both axes, never visually stacked.
       const branchChance = profile === 0
-        ? .58 - routeProgress * .22
-        : profile === 2 ? .08
-          : .42 - routeProgress * .2;
+        ? .24 - routeProgress * .07
+        : profile === 2 ? .06
+          : .18 - routeProgress * .05;
       if (Math.random() < branchChance) {
-        const branchY = y + randomBetween(38, 74);
+        const branchY = y + randomBetween(56, 94);
         const branchWidth = PLATFORM_WIDTH;
         const branchSources = reachableNow().filter((platform) => {
           const gap = branchY - platform.y;
@@ -1356,7 +1356,7 @@ function generateWorld(state: GameState, targetY: number) {
 
       // Broken boards are tempting extra targets from the beginning, as in the
       // reference, but never replace the only reachable solid board.
-      if (Math.random() < .2 + difficulty * .17) {
+      if (Math.random() < .09 + difficulty * .11) {
         const brokenWidth = PLATFORM_WIDTH;
         for (let tries = 0; tries < 18; tries += 1) {
           const brokenX = randomBetween(34, WIDTH - 34);
@@ -1369,9 +1369,9 @@ function generateWorld(state: GameState, targetY: number) {
       }
 
       let nextGap = randomBetween(baseGapMin, baseGapMax);
-      if (profile === 0 && Math.random() < .32) nextGap *= randomBetween(.65, .82);
+      if (profile === 0 && Math.random() < .2) nextGap *= randomBetween(.9, .96);
       if (profile === 2 && Math.random() < .42) nextGap *= randomBetween(1.08, 1.22);
-      y += clampNumber(nextGap, 42, maxRouteGap);
+      y += clampNumber(nextGap, 54, maxRouteGap);
     }
 
     // Audit the upper end of every segment. Keep inserting reachable solid
@@ -1577,6 +1577,8 @@ function drawPlatform(
   time: number,
   flowerImage: HTMLImageElement | null,
   springFlowerImage: HTMLImageElement | null,
+  brokenFlowerImage: HTMLImageElement | null,
+  fadingFlowerImage: HTMLImageElement | null,
 ) {
   const shake = p.breaking > 0 ? Math.sin(time * 0.09) * 5 : 0;
   ctx.save();
@@ -1613,17 +1615,24 @@ function drawPlatform(
   const moving = p.kind === "moving";
   const fading = p.kind === "fading";
   const windFlower = p.kind === "windFlower";
-  const platformImage = p.kind === "spring" ? springFlowerImage : flowerImage;
+  const platformImage = p.kind === "spring"
+    ? springFlowerImage
+    : broken
+      ? brokenFlowerImage
+      : fading
+        ? fadingFlowerImage
+        : flowerImage;
 
   if (platformImage) {
-    const spriteWidth = p.width;
-    const spriteHeight = p.kind === "spring" ? 43 : 36;
+    const springPulse = p.kind === "spring" ? (Math.sin(time * .012) + 1) / 2 : 0;
+    const spriteWidth = p.width * (p.kind === "spring" ? .98 + springPulse * .04 : 1);
+    const spriteHeight = p.kind === "spring" ? 46 + springPulse * 3 : 36;
     const spriteX = p.x - spriteWidth / 2;
-    const spriteY = sy - 10;
+    const spriteY = p.kind === "spring" ? sy - 18 - springPulse * 1.5 : sy - 10;
 
     ctx.fillStyle = "rgba(68,53,36,.16)";
     ctx.beginPath();
-    ctx.ellipse(p.x, sy + spriteHeight - 13, spriteWidth * .38, 3.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(p.x, spriteY + spriteHeight - 3, spriteWidth * .38, 3.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
     if (moving) {
@@ -1642,7 +1651,7 @@ function drawPlatform(
     }
 
     if (broken) {
-      const gap = 3.5 + p.breaking * 7;
+      const gap = 1.5 + p.breaking * 10;
       for (const side of [-1, 1] as const) {
         ctx.save();
         ctx.translate(
@@ -1665,13 +1674,14 @@ function drawPlatform(
         ctx.restore();
       }
       ctx.save();
-      ctx.strokeStyle = "rgba(83,43,39,.78)";
-      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = "rgba(76,31,20,.92)";
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
-      ctx.moveTo(p.x - 1, sy - 5);
-      ctx.lineTo(p.x + 2, sy + 1);
-      ctx.lineTo(p.x - 2, sy + 7);
-      ctx.lineTo(p.x + 2, sy + 13);
+      ctx.moveTo(p.x - 2, sy - 7);
+      ctx.lineTo(p.x + 2.5, sy - 1);
+      ctx.lineTo(p.x - 2.5, sy + 5);
+      ctx.lineTo(p.x + 2, sy + 12);
+      ctx.lineTo(p.x - 1, sy + 18);
       ctx.stroke();
       ctx.restore();
     } else {
@@ -2523,6 +2533,8 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
   const flowerPlatformImageRef = useRef<HTMLImageElement | null>(null);
   const springFlowerImageRef = useRef<HTMLImageElement | null>(null);
+  const brokenFlowerImageRef = useRef<HTMLImageElement | null>(null);
+  const fadingFlowerImageRef = useRef<HTMLImageElement | null>(null);
   const honeyJarImageRef = useRef<HTMLImageElement | null>(null);
   const orientationRef = useRef({ tilt: 0, baseline: 0, calibrated: false, reported: false });
   const pointerRef = useRef({ active: false, x: WIDTH / 2, startX: WIDTH / 2, startTime: 0, moved: false });
@@ -2551,6 +2563,8 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const backgroundImage = new Image();
     const flowerPlatformImage = new Image();
     const springFlowerImage = new Image();
+    const brokenFlowerImage = new Image();
+    const fadingFlowerImage = new Image();
     const honeyJarImage = new Image();
     const markBeeReady = () => {
       if (beeImage.naturalWidth > 0) beeImageRef.current = beeImage;
@@ -2565,7 +2579,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     bambooCopterImage.src = "/bamboo-copter-silver-v1.png?v=20260804";
     backgroundImage.src = "/game-background-long.png";
     flowerPlatformImage.src = "/flower-platform-3d-v1.png?v=20260804";
-    springFlowerImage.src = "/spring-flower-3d-v1.png?v=20260804";
+    springFlowerImage.src = "/spring-flower-blue-v2.png?v=20260804";
+    brokenFlowerImage.src = "/broken-flower-orange-v1.png?v=20260804";
+    fadingFlowerImage.src = "/fading-flower-white-v1.png?v=20260804";
     honeyJarImage.src = "/honey-jar-3d-v1.png?v=20260804";
     if (beeImage.complete) markBeeReady();
     void beeImage.decode().then(markBeeReady).catch(() => undefined);
@@ -2576,6 +2592,8 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
     flowerPlatformImage.onload = () => { flowerPlatformImageRef.current = flowerPlatformImage; };
     springFlowerImage.onload = () => { springFlowerImageRef.current = springFlowerImage; };
+    brokenFlowerImage.onload = () => { brokenFlowerImageRef.current = brokenFlowerImage; };
+    fadingFlowerImage.onload = () => { fadingFlowerImageRef.current = fadingFlowerImage; };
     honeyJarImage.onload = () => { honeyJarImageRef.current = honeyJarImage; };
     if (mantisEnemyImage.complete && mantisEnemyImage.naturalWidth > 0) mantisEnemyImageRef.current = mantisEnemyImage;
     if (hornetEnemyImage.complete && hornetEnemyImage.naturalWidth > 0) hornetEnemyImageRef.current = hornetEnemyImage;
@@ -2583,6 +2601,8 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     if (bambooCopterImage.complete && bambooCopterImage.naturalWidth > 0) bambooCopterImageRef.current = bambooCopterImage;
     if (flowerPlatformImage.complete && flowerPlatformImage.naturalWidth > 0) flowerPlatformImageRef.current = flowerPlatformImage;
     if (springFlowerImage.complete && springFlowerImage.naturalWidth > 0) springFlowerImageRef.current = springFlowerImage;
+    if (brokenFlowerImage.complete && brokenFlowerImage.naturalWidth > 0) brokenFlowerImageRef.current = brokenFlowerImage;
+    if (fadingFlowerImage.complete && fadingFlowerImage.naturalWidth > 0) fadingFlowerImageRef.current = fadingFlowerImage;
     if (honeyJarImage.complete && honeyJarImage.naturalWidth > 0) honeyJarImageRef.current = honeyJarImage;
     return () => {
       beeImageRef.current = null;
@@ -2593,6 +2613,8 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       backgroundImageRef.current = null;
       flowerPlatformImageRef.current = null;
       springFlowerImageRef.current = null;
+      brokenFlowerImageRef.current = null;
+      fadingFlowerImageRef.current = null;
       honeyJarImageRef.current = null;
     };
   }, []);
@@ -2686,7 +2708,16 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       for (const p of state.platforms) {
         const sy = screenY(p.y, state.cameraY);
         if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) {
-          drawPlatform(ctx, p, sy, time, flowerPlatformImageRef.current, springFlowerImageRef.current);
+          drawPlatform(
+            ctx,
+            p,
+            sy,
+            time,
+            flowerPlatformImageRef.current,
+            springFlowerImageRef.current,
+            brokenFlowerImageRef.current,
+            fadingFlowerImageRef.current,
+          );
         }
       }
       for (const item of state.airItems) {
