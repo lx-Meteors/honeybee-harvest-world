@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Phase = "menu" | "playing" | "paused" | "revive" | "failed";
+type Phase = "menu" | "playing" | "paused" | "failed";
 type ControlMode = "motion" | "touch";
 type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading" | "windFlower";
 type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar" | "waxShield";
@@ -2357,11 +2357,10 @@ function drawBeeSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x
   ctx.restore();
 }
 
-function GameCanvas({ phase, controlMode, resetToken, reviveToken, onStats, onFail, onMotionDetected }: {
+function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionDetected }: {
   phase: Phase;
   controlMode: ControlMode;
   resetToken: number;
-  reviveToken: number;
   onStats: (honey: number, height: number, ammo: number) => void;
   onFail: (honey: number) => void;
   onMotionDetected: () => void;
@@ -2393,53 +2392,6 @@ function GameCanvas({ phase, controlMode, resetToken, reviveToken, onStats, onFa
     orientationRef.current.calibrated = false;
     orientationRef.current.reported = false;
   }, [resetToken]);
-  useEffect(() => {
-    if (reviveToken <= 0) return;
-    const state = stateRef.current;
-    const targetY = state.cameraY + 275;
-    let recovery = state.platforms
-      .filter((platform) => (
-        isLandingPlatform(platform)
-        && platform.y > state.cameraY + 95
-        && platform.y < state.cameraY + 610
-        && platform.kind !== "fading"
-      ))
-      .sort((a, b) => Math.abs(a.y - targetY) - Math.abs(b.y - targetY))[0];
-
-    if (!recovery) {
-      recovery = {
-        id: state.nextId++,
-        x: WIDTH / 2,
-        y: targetY,
-        width: 96,
-        kind: "flower",
-        used: true,
-        breaking: 0,
-      };
-      state.platforms.push(recovery);
-    }
-
-    state.beeX = recovery.x;
-    state.beeY = recovery.y + 31;
-    state.vx = 0;
-    state.vy = JUMP_SPEED;
-    state.ended = false;
-    state.invincible = 2.2;
-    state.shield = 1;
-    state.lastTime = 0;
-    state.airItems.forEach((item) => {
-      const dangerous = item.kind === "bear"
-        || item.kind === "hornet"
-        || item.kind === "bat"
-        || item.kind === "web"
-        || item.kind === "blackHole";
-      const closeToRecovery = Math.abs(item.y - recovery.y) < 190
-        && Math.min(Math.abs(item.x - recovery.x), WIDTH - Math.abs(item.x - recovery.x)) < 155;
-      if (dangerous && closeToRecovery) item.used = true;
-    });
-    playGameSound("shield");
-    burst(state, recovery.x, screenY(recovery.y, state.cameraY), "#ffe878", 28);
-  }, [reviveToken]);
   useEffect(() => {
     const beeImage = new Image();
     const redMonsterImage = new Image();
@@ -2912,14 +2864,12 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
-  const [reviveToken, setReviveToken] = useState(0);
   const [stats, setStats] = useState({ honey: 0, height: 0, ammo: 1 });
-  const [result, setResult] = useState({ honey: 0, isRecord: false });
+  const [result, setResult] = useState({ honey: 0 });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
   const [motionNotice, setMotionNotice] = useState("");
   const finishLock = useRef(false);
-  const reviveUsed = useRef(false);
   const motionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -2947,38 +2897,20 @@ export default function Home() {
   const onStats = useCallback((honey: number, height: number, ammo: number) => {
     setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.ammo === ammo ? old : { honey, height, ammo });
   }, []);
-  const finishRun = useCallback((honey: number) => {
-    const isRecord = honey > best;
-    const nextBest = Math.max(best, honey);
-    setBest(nextBest);
-    localStorage.setItem("honeybee-harvest-v3", String(nextBest));
-    setResult({ honey, isRecord });
-    setPhase("failed");
-  }, [best]);
   const onFail = useCallback((honey: number) => {
     if (finishLock.current) return;
     finishLock.current = true;
-    setResult({ honey, isRecord: honey > best });
-    if (!reviveUsed.current) {
-      setPhase("revive");
-      return;
-    }
-    finishRun(honey);
-  }, [best, finishRun]);
-  const continueGame = () => {
-    unlockGameAudio();
-    reviveUsed.current = true;
-    finishLock.current = false;
-    setReviveToken((value) => value + 1);
-    setPhase("playing");
-  };
-  const endCurrentRun = () => finishRun(result.honey);
+    const nextBest = Math.max(best, honey);
+    setBest(nextBest);
+    localStorage.setItem("honeybee-harvest-v3", String(nextBest));
+    setResult({ honey });
+    setPhase("failed");
+  }, [best]);
   const startGame = () => {
     unlockGameAudio();
     setBackgroundMusic(true);
     playGameSound("start");
     finishLock.current = false;
-    reviveUsed.current = false;
     setStats({ honey: 0, height: 0, ammo: 1 });
     setResetToken((value) => value + 1);
     setPhase("playing");
@@ -3015,25 +2947,6 @@ export default function Home() {
     }
   };
 
-  const resultTitle = result.isRecord && result.honey >= 300
-    ? "刷新最高纪录！"
-    : result.honey >= 1800
-      ? "花园飞行王！"
-      : result.honey >= 900
-        ? "采蜜高手！"
-        : result.honey >= 300
-          ? "这次飞得不错！"
-          : "再飞一次吧！";
-  const resultDescription = result.isRecord && result.honey >= 300
-    ? "新的采蜜纪录已经写进蜂巢荣誉榜。"
-    : result.honey >= 1800
-      ? "你已经飞过花园中最难的一段。"
-      : result.honey >= 900
-        ? "路线判断越来越稳，继续挑战更高纪录。"
-        : result.honey >= 300
-          ? "已经掌握飞行节奏，再向更高处出发。"
-          : "熟悉花朵节奏，下一次一定能飞得更高。";
-
   return (
     <main className="page-shell">
       <section className="brand-panel" aria-label="游戏介绍">
@@ -3047,7 +2960,7 @@ export default function Home() {
       </section>
 
       <section className="game-phone">
-        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} reviveToken={reviveToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
+        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
         <header className="game-hud" aria-live="polite">
           <div className="hud-pill score-pill"><span className="honey-drop" /><span><small>采蜜值</small><b>{stats.honey}</b></span></div>
         </header>
@@ -3066,17 +2979,6 @@ export default function Home() {
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
         {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌼</span><p className="intro-kicker">休息一下</p><h2>采蜜暂停</h2><p>当前采蜜值已为你保留。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
-        {phase === "revive" && <div className="game-overlay revive-overlay">
-          <div className="revive-card">
-            <div className="revive-badge" aria-hidden="true"><span>1</span></div>
-            <p className="revive-kicker">本局仅有一次</p>
-            <h2>再给小蜜蜂一次机会</h2>
-            <p className="revive-score">当前采蜜值 <strong>{result.honey}</strong></p>
-            <p className="revive-copy">从附近的安全花朵重新起飞，并获得短暂保护与一层蜂蜡护盾。</p>
-            <button className="revive-primary" type="button" onClick={continueGame}>继续飞行</button>
-            <button className="revive-secondary" type="button" onClick={endCurrentRun}>结束本局</button>
-          </div>
-        </div>}
         {phase === "failed" && <div className="game-overlay result-overlay result-overlay-v2">
           <div className="result-float-layer" aria-hidden="true">
             <i className="result-float result-drop float-one" />
@@ -3088,8 +2990,8 @@ export default function Home() {
           </div>
           <div className="result-hero-v3" aria-hidden="true" />
           <div className="result-sheet result-sheet-v2">
-            <h2>{resultTitle}</h2>
-            <p className="result-copy">{resultDescription}</p>
+            <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
+            <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
             <div className="result-main-score">
               <small>本次采蜜值</small>
               <strong><span className="honey-drop large" />{result.honey}</strong>
