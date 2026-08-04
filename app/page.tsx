@@ -97,6 +97,8 @@ const COPTER_RECOVERY_DISTANCE = 1380;
 const WIND_FLIGHT_TIME = .72;
 const WIND_SPEED = 735;
 const SFX_VOLUME = .66;
+const MUSIC_VOLUME = .085;
+const DANGER_MUSIC_VOLUME = .026;
 
 let sharedAudioContext: AudioContext | null = null;
 let activeBearDangerLoop: HTMLAudioElement | null = null;
@@ -105,6 +107,8 @@ let bearSynthTimer: number | null = null;
 let backgroundMusic: HTMLAudioElement | null = null;
 let synthMusicTimer: number | null = null;
 let synthMusicStep = 0;
+let bearDangerActive = false;
+let blackHoleDangerActive = false;
 const audioPools = new Map<SoundKind, HTMLAudioElement[]>();
 
 const SOUND_FILES: Partial<Record<SoundKind, string>> = {
@@ -113,7 +117,6 @@ const SOUND_FILES: Partial<Record<SoundKind, string>> = {
   spring: "/sfx/spring.ogg",
   break: "/sfx/break.ogg",
   honey: "/sfx/honey.ogg",
-  rocket: "/sfx/rocket.ogg",
   shoot: "/sfx/shoot.ogg",
   hit: "/sfx/hit.ogg",
   fail: "/sfx/fail.ogg",
@@ -127,9 +130,7 @@ const SOUND_MIX: Partial<Record<SoundKind, number>> = {
   spring: .88,
   break: .76,
   honey: .78,
-  rocket: .82,
-  copter: .72,
-  bearWarning: .62,
+  bearWarning: 1,
   webWind: .68,
   blackHole: .72,
   fail: .82,
@@ -243,16 +244,17 @@ function playSynthSound(kind: SoundKind) {
     noise(.6, "bandpass", 480, 1700, .035, 0, .08);
     tone(420, 760, .34, "sine", .018, .04);
   } else if (kind === "rocket") {
-    noise(1.05, "lowpass", 420, 1250, .052, 0, .08);
-    tone(72, 185, .7, "sawtooth", .024);
-    tone(118, 270, .58, "triangle", .018, .08);
+    // A clean lift-off whoosh with a warm rising body, without the old harsh motor loop.
+    noise(.92, "bandpass", 260, 980, .026, 0, .14);
+    tone(92, 245, .72, "sine", .023, .02);
+    tone(184, 490, .55, "sine", .011, .13);
   } else if (kind === "copter") {
-    // A soft bamboo-whirl cue: airy lift plus two light wooden chimes.
-    // It deliberately avoids the harsh, repeating motor texture of the old recording.
-    noise(.9, "bandpass", 620, 1280, .018, 0, .16);
-    tone(330, 440, .38, "sine", .018, .02);
-    tone(440, 587, .48, "sine", .013, .2);
-    tone(660, 780, .22, "triangle", .008, .48);
+    // A short, friendly three-note twirl. The visual already explains the propeller,
+    // so the cue stays musical instead of imitating a mechanical rotor.
+    tone(523, 659, .2, "sine", .021, 0);
+    tone(659, 784, .2, "sine", .019, .1);
+    tone(784, 1047, .24, "sine", .016, .2);
+    noise(.42, "bandpass", 760, 1380, .007, .04, .1);
   } else if (kind === "shoot") {
     noise(.09, "highpass", 2200, 680, .025, 0, .005);
     tone(690, 280, .1, "triangle", .028);
@@ -301,13 +303,22 @@ function startBearSynthLoop() {
   bearSynthTimer = window.setInterval(() => playGameSound("bearWarning"), 920);
 }
 
+function syncDangerMusicVolume() {
+  if (!backgroundMusic) return;
+  backgroundMusic.volume = bearDangerActive || blackHoleDangerActive
+    ? DANGER_MUSIC_VOLUME
+    : MUSIC_VOLUME;
+}
+
 function setBearDangerSound(active: boolean) {
+  bearDangerActive = active;
+  syncDangerMusicVolume();
   if (!active && !activeBearDangerLoop && bearSynthTimer === null) return;
   if (active && !activeBearDangerLoop && typeof window !== "undefined") {
     const loop = new Audio("/sfx/monster-warning-v2.wav?v=20260804");
     loop.loop = true;
     loop.preload = "auto";
-    loop.volume = SFX_VOLUME * .68;
+    loop.volume = Math.min(1, SFX_VOLUME * 1.28);
     void loop.play().then(stopBearSynthLoop).catch(startBearSynthLoop);
     activeBearDangerLoop = loop;
   } else if (!active && activeBearDangerLoop) {
@@ -321,12 +332,14 @@ function setBearDangerSound(active: boolean) {
 }
 
 function setBlackHoleDangerSound(active: boolean) {
+  blackHoleDangerActive = active;
+  syncDangerMusicVolume();
   if (!active && !activeBlackHoleLoop) return;
   if (active && !activeBlackHoleLoop && typeof window !== "undefined") {
     const loop = new Audio("/sfx/black-hole-v2.wav?v=20260804");
     loop.loop = true;
     loop.preload = "auto";
-    loop.volume = SFX_VOLUME * .68;
+    loop.volume = Math.min(1, SFX_VOLUME * 1.12);
     void loop.play().catch(() => playSynthSound("blackHole"));
     activeBlackHoleLoop = loop;
   } else if (!active && activeBlackHoleLoop) {
@@ -385,7 +398,7 @@ function prepareBackgroundMusic() {
     backgroundMusic = new Audio("/sfx/flowerbed-fields.ogg?v=20260804");
     backgroundMusic.loop = true;
     backgroundMusic.preload = "auto";
-    backgroundMusic.volume = .085;
+    backgroundMusic.volume = MUSIC_VOLUME;
     backgroundMusic.load();
   }
   return backgroundMusic;
@@ -399,6 +412,7 @@ function setBackgroundMusic(active: boolean) {
       startSynthBackgroundMusic();
       return;
     }
+    syncDangerMusicVolume();
     void music.play().then(stopSynthBackgroundMusic).catch(startSynthBackgroundMusic);
   } else if (backgroundMusic) {
     backgroundMusic.pause();
