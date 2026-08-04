@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Phase = "menu" | "playing" | "paused" | "failed";
 type ControlMode = "motion" | "touch";
-type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading";
-type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar";
-type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
+type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading" | "windFlower";
+type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar" | "waxShield";
+type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shield" | "wind" | "pollenRain" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
+type IntroductionKind = "moving" | "fading" | "bear" | "hornet" | "web" | "bat" | "blackHole";
 
 type Platform = {
   id: number;
@@ -23,7 +24,7 @@ type Platform = {
   route?: "safe" | "risk";
 };
 
-type AirItem = { id: number; x: number; y: number; kind: AirKind; used: boolean; value?: number; baseX?: number; range?: number; speed?: number; phase?: number; audioPlayed?: boolean };
+type AirItem = { id: number; x: number; y: number; kind: AirKind; used: boolean; value?: number; strength?: number; baseX?: number; range?: number; speed?: number; phase?: number; audioPlayed?: boolean };
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; color: string; size: number };
 type PollenShot = { x: number; y: number; vy: number; life: number };
 
@@ -53,8 +54,12 @@ type GameState = {
   springTargetX: number;
   lastHazardStep: number;
   lastJarStep: number;
+  introduced: Record<IntroductionKind, boolean>;
+  nextShieldScore: number;
+  nextWindFlowerScore: number;
   ammo: number;
   ammoProgress: number;
+  shield: number;
   nextRocketY: number;
   rocketRecoveryY: number;
   rocketRecoveryX: number;
@@ -63,6 +68,8 @@ type GameState = {
   copterRecoveryX: number;
   nextId: number;
   invincible: number;
+  windTimer: number;
+  pollenRainActive: boolean;
   rocketTimer: number;
   copterTimer: number;
   lastTime: number;
@@ -87,6 +94,11 @@ const COPTER_INTERVAL_METERS = 320;
 const COPTER_INTERVAL_WORLD = COPTER_INTERVAL_METERS * HEIGHT_SCALE;
 const COPTER_FLIGHT_TIME = 1.45;
 const COPTER_RECOVERY_DISTANCE = 1380;
+const WIND_FLIGHT_TIME = .72;
+const WIND_SPEED = 735;
+const POLLEN_RAIN_START = 700;
+const POLLEN_RAIN_INTERVAL = 800;
+const POLLEN_RAIN_SPAN = 180;
 const SFX_VOLUME = .66;
 
 let sharedAudioContext: AudioContext | null = null;
@@ -227,6 +239,15 @@ function playSynthSound(kind: SoundKind) {
     tone(523, 784, .17, "sine", .038);
     tone(659, 1046, .2, "sine", .029, .08);
     tone(784, 1318, .17, "sine", .019, .16);
+  } else if (kind === "shield") {
+    tone(392, 784, .2, "sine", .038);
+    tone(659, 1174, .25, "triangle", .025, .08);
+  } else if (kind === "wind") {
+    noise(.6, "bandpass", 480, 1700, .035, 0, .08);
+    tone(420, 760, .34, "sine", .018, .04);
+  } else if (kind === "pollenRain") {
+    tone(659, 988, .24, "sine", .018);
+    tone(784, 1318, .25, "sine", .014, .12);
   } else if (kind === "rocket") {
     noise(1.05, "lowpass", 420, 1250, .052, 0, .08);
     tone(72, 185, .7, "sawtooth", .024);
@@ -378,6 +399,11 @@ function heightMeters(worldY: number) {
   return Math.max(0, (worldY - 48) / HEIGHT_SCALE);
 }
 
+function isPollenRainScore(score: number) {
+  if (score < POLLEN_RAIN_START) return false;
+  return (score - POLLEN_RAIN_START) % POLLEN_RAIN_INTERVAL < POLLEN_RAIN_SPAN;
+}
+
 function firstState(): GameState {
   return {
     beeX: WIDTH / 2,
@@ -405,8 +431,20 @@ function firstState(): GameState {
     springTargetX: WIDTH / 2,
     lastHazardStep: -20,
     lastJarStep: -20,
+    introduced: {
+      moving: false,
+      fading: false,
+      bear: false,
+      hornet: false,
+      web: false,
+      bat: false,
+      blackHole: false,
+    },
+    nextShieldScore: 600,
+    nextWindFlowerScore: 350,
     ammo: 1,
     ammoProgress: 0,
+    shield: 0,
     nextRocketY: 48 + ROCKET_INTERVAL_WORLD,
     rocketRecoveryY: 0,
     rocketRecoveryX: WIDTH / 2,
@@ -415,6 +453,8 @@ function firstState(): GameState {
     copterRecoveryX: WIDTH / 2,
     nextId: 1,
     invincible: 0,
+    windTimer: 0,
+    pollenRainActive: false,
     rocketTimer: 0,
     copterTimer: 0,
     lastTime: 0,
@@ -442,16 +482,16 @@ function clampNumber(value: number, min: number, max: number) {
 }
 
 function progressionStageAtHeight(meters: number) {
-  return meters < 400 ? 0
-    : meters < 900 ? 1
-      : meters < 1700 ? 2
-        : meters < 2600 ? 3
-          : meters < 3600 ? 4
+  return meters < 300 ? 0
+    : meters < 650 ? 1
+      : meters < 1000 ? 2
+        : meters < 1450 ? 3
+          : meters < 2100 ? 4
             : 5;
 }
 
 function linearDifficultyAtHeight(meters: number) {
-  return clampNumber(meters / 4300, 0, 1);
+  return clampNumber(meters / 3200, 0, 1);
 }
 
 function platformPlacementOverlaps(platforms: Platform[], x: number, y: number, width: number) {
@@ -1107,7 +1147,10 @@ function generateWorldChunkedReference(state: GameState, targetY: number) {
 function generateWorld(state: GameState, targetY: number) {
   while (state.generatedTo < targetY) {
     const segmentBottom = state.generatedTo;
-    const meters = heightMeters(segmentBottom);
+    // All unlocks use the same value the player sees: climbed height plus
+    // collected honey and monster rewards. This keeps content from lagging
+    // hundreds of points behind the HUD score.
+    const meters = heightMeters(segmentBottom) + state.bonusHoney;
     const stage = progressionStageAtHeight(meters);
     const difficulty = linearDifficultyAtHeight(meters);
     const segmentHeight = randomBetween(900, 1080);
@@ -1119,9 +1162,9 @@ function generateWorld(state: GameState, targetY: number) {
     const profileRoll = Math.random();
     let profile = 1;
     if (profileRoll < .27 - difficulty * .1) profile = 0;
-    else if (difficulty > .16 && profileRoll < .38 + difficulty * .08) profile = 2;
-    else if (difficulty > .24 && profileRoll < .5 + difficulty * .08) profile = 3;
-    else if (difficulty > .28 && profileRoll < .66 + difficulty * .08) profile = 4;
+    else if (meters > 900 && profileRoll < .38 + difficulty * .08) profile = 2;
+    else if (meters > 900 && profileRoll < .5 + difficulty * .08) profile = 3;
+    else if (meters > 700 && profileRoll < .66 + difficulty * .08) profile = 4;
     if (profile === 2 && state.routePattern === 2) profile = Math.random() < .5 ? 0 : 1;
     state.routePattern = profile;
 
@@ -1238,8 +1281,19 @@ function generateWorld(state: GameState, targetY: number) {
 
       let kind: PlatformKind = "flower";
       const movingRate = profile === 4 ? .34 + difficulty * .15 : .025 + difficulty * .11;
-      if (meters > 520 && Math.random() < movingRate) kind = "moving";
-      else if (meters > 2600 && Math.random() < .015 + difficulty * .1) kind = "fading";
+      if (meters >= 250 && !state.introduced.moving) {
+        kind = "moving";
+        state.introduced.moving = true;
+      } else if (meters >= state.nextWindFlowerScore) {
+        kind = "windFlower";
+        state.nextWindFlowerScore += randomBetween(480, 680);
+      } else if (meters >= 250 && Math.random() < movingRate) {
+        kind = "moving";
+        state.introduced.moving = true;
+      } else if (meters >= 1200 && (!state.introduced.fading || Math.random() < .025 + difficulty * .1)) {
+        kind = "fading";
+        state.introduced.fading = true;
+      }
       const main = pushPlatform(x, y, width, kind);
       state.lastPlatformX = main.x;
       generatedCount += 1;
@@ -1339,11 +1393,12 @@ function generateWorld(state: GameState, targetY: number) {
     }
 
     const placeBoost = (kind: "rocket" | "bambooCopter", threshold: number) => {
-      if (threshold > segmentTop) return false;
+      const thresholdScore = heightMeters(threshold);
+      if (meters < thresholdScore) return false;
       const candidates = safeField.filter((platform) => (
         platform.kind === "flower"
-        && platform.y >= threshold - 170
-        && platform.y <= threshold + 190
+        && platform.y > segmentBottom + 110
+        && platform.y < segmentTop - 110
       ));
       const platform = candidates[Math.floor(Math.random() * candidates.length)];
       if (!platform) return false;
@@ -1368,7 +1423,9 @@ function generateWorld(state: GameState, targetY: number) {
     const rocketPlaced = placeBoost("rocket", state.nextRocketY);
     if (!rocketPlaced) placeBoost("bambooCopter", state.nextCopterY);
 
-    if (meters > 55 && safeField.length > 0 && Math.random() < .24) {
+    const pollenRain = isPollenRainScore(meters);
+    const firstJarDue = state.lastJarStep < 0;
+    if (meters > 55 && safeField.length > 0 && (firstJarDue || Math.random() < (pollenRain ? .68 : .24))) {
       const jarPlatform = safeField[Math.floor(Math.random() * safeField.length)];
       if (!state.airItems.some((item) => Math.abs(item.y - jarPlatform.y) < 90)) {
         state.airItems.push({
@@ -1379,22 +1436,54 @@ function generateWorld(state: GameState, targetY: number) {
           used: false,
           value: profile === 2 ? 100 : 50,
         });
+        state.lastJarStep = state.routeStep;
       }
     }
 
-    // The video first introduces a single airborne monster after the player
-    // has learned the jump rhythm. Sparse pockets never carry a monster.
+    if (meters >= state.nextShieldScore && safeField.length > 0) {
+      const shieldCandidates = safeField.filter((platform) => (
+        platform.kind === "flower"
+        && !state.airItems.some((item) => Math.abs(item.y - platform.y) < 100)
+      ));
+      const shieldPlatform = shieldCandidates[Math.floor(Math.random() * shieldCandidates.length)];
+      if (shieldPlatform) {
+        state.airItems.push({
+          id: state.nextId++,
+          x: shieldPlatform.x,
+          y: shieldPlatform.y + 46,
+          kind: "waxShield",
+          used: false,
+        });
+        state.nextShieldScore += randomBetween(680, 900);
+      }
+    }
+
+    // Every core hazard is guaranteed once inside an early score window. Later
+    // appearances remain random. Sparse pockets never carry a hazard, so an
+    // open jump and a lethal object cannot be combined in the same segment.
     const enoughRoomSinceHazard = state.routeStep - state.lastHazardStep > Math.round(13 - difficulty * 3);
-    const hazardChance = meters < 620 || profile === 2
+    const hazardUnlocks: Array<[IntroductionKind, number]> = [
+      ["bear", 450],
+      ["hornet", 700],
+      ["web", 950],
+      ["bat", 1200],
+      ["blackHole", 1500],
+    ];
+    const forcedKind = hazardUnlocks.find(([kind, threshold]) => meters >= threshold && !state.introduced[kind])?.[0];
+    const firstBlackHole = forcedKind === "blackHole";
+    const profileAllowsHazard = profile !== 2 && (!firstBlackHole || profile === 0);
+    const hazardChance = meters < 450 || !profileAllowsHazard
       ? 0
-      : .16 + difficulty * .3;
-    if (enoughRoomSinceHazard && Math.random() < hazardChance && safeField.length >= 4) {
+      : .18 + difficulty * .28;
+    if (enoughRoomSinceHazard && (forcedKind !== undefined || Math.random() < hazardChance) && safeField.length >= 4 && profileAllowsHazard) {
       const hazardRoll = Math.random();
-      let kind: AirKind = "bear";
-      if (meters > 3100 && hazardRoll < .16) kind = "blackHole";
-      else if (meters > 2100 && hazardRoll < .42) kind = "bat";
-      else if (meters > 1250 && hazardRoll < .68) kind = "hornet";
-      else if (meters > 1700 && hazardRoll < .83) kind = "web";
+      let kind: IntroductionKind = forcedKind ?? "bear";
+      if (!forcedKind) {
+        if (meters >= 1500 && hazardRoll < .12) kind = "blackHole";
+        else if (meters >= 1200 && hazardRoll < .36) kind = "bat";
+        else if (meters >= 700 && hazardRoll < .61) kind = "hornet";
+        else if (meters >= 950 && hazardRoll < .78) kind = "web";
+      }
       const ordered = [...safeField].sort((a, b) => a.y - b.y);
       const lowerIndex = Math.floor(randomBetween(1, Math.max(2, ordered.length - 2)));
       const lower = ordered[Math.min(lowerIndex, ordered.length - 2)];
@@ -1404,10 +1493,13 @@ function generateWorld(state: GameState, targetY: number) {
       if (lower && upper) {
         const item: AirItem = {
           id: state.nextId++,
-          x: clampNumber((lower.x + upper.x) / 2 + randomBetween(-56, 56), 48, WIDTH - 48),
+          x: kind === "blackHole" && !state.introduced.blackHole
+            ? clampNumber((lower.x + upper.x) / 2, 200, WIDTH - 200)
+            : clampNumber((lower.x + upper.x) / 2 + randomBetween(-56, 56), 48, WIDTH - 48),
           y: (lower.y + upper.y) / 2 + randomBetween(-18, 18),
           kind,
           used: false,
+          strength: kind === "blackHole" && !state.introduced.blackHole ? .7 : 1,
         };
         if (kind === "bear" || kind === "hornet" || kind === "bat") {
           item.baseX = item.x;
@@ -1416,6 +1508,7 @@ function generateWorld(state: GameState, targetY: number) {
           item.phase = Math.random() * Math.PI * 2;
         }
         state.airItems.push(item);
+        state.introduced[kind] = true;
         state.lastHazardStep = state.routeStep;
       }
     }
@@ -1465,10 +1558,11 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
   const broken = p.kind === "broken";
   const moving = p.kind === "moving";
   const fading = p.kind === "fading";
+  const windFlower = p.kind === "windFlower";
   const outline = "#403b38";
-  const board = broken ? "#9a765c" : moving ? "#39aee1" : fading ? "#fffdf7" : "#ff8fb1";
-  const boardLight = broken ? "#cfad91" : moving ? "#9fe5ff" : fading ? "#ffffff" : "#ffd0df";
-  const center = broken ? "#6c5040" : moving ? "#ffd34d" : fading ? "#efcad8" : "#f5ae29";
+  const board = broken ? "#9a765c" : moving ? "#39aee1" : windFlower ? "#67d3c1" : fading ? "#fffdf7" : "#ff8fb1";
+  const boardLight = broken ? "#cfad91" : moving ? "#9fe5ff" : windFlower ? "#cafff3" : fading ? "#ffffff" : "#ffd0df";
+  const center = broken ? "#6c5040" : moving ? "#ffd34d" : windFlower ? "#fff0a2" : fading ? "#efcad8" : "#f5ae29";
 
   ctx.fillStyle = "rgba(62,48,38,.16)";
   ctx.beginPath();
@@ -1510,7 +1604,7 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
     ctx.ellipse(p.x, sy, Math.min(14, p.width * .18), 4.7, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.strokeStyle = moving ? "#177ead" : fading ? "#d8a9ba" : "#d76289";
+    ctx.strokeStyle = moving ? "#177ead" : windFlower ? "#278f82" : fading ? "#d8a9ba" : "#d76289";
     ctx.lineWidth = 1.2;
     for (const offset of [-.3, .3]) {
       ctx.beginPath();
@@ -1541,6 +1635,23 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
     ctx.moveTo(p.x + 14, baseY);
     ctx.lineTo(p.x + 11.5, topY);
     ctx.stroke();
+    ctx.restore();
+  }
+  if (windFlower) {
+    const drift = Math.sin(time * .006) * 3;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 2.1;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 3; i += 1) {
+      const rise = (time * .045 + i * 14) % 38;
+      const windY = sy - 9 - rise;
+      ctx.globalAlpha = .32 + (1 - rise / 38) * .55;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 14 + drift, windY);
+      ctx.bezierCurveTo(p.x - 3, windY - 5, p.x + 5, windY + 5, p.x + 15 - drift, windY - 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
   ctx.restore();
@@ -1875,6 +1986,75 @@ function drawHoneyJar(ctx: CanvasRenderingContext2D, x: number, y: number, time:
   ctx.fillStyle = "#7a4c16";
   ctx.font = "900 10px sans-serif";
   ctx.fillText("蜂蜜", 0, 34);
+  ctx.restore();
+}
+
+function drawWaxShield(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, attached = false) {
+  ctx.save();
+  ctx.translate(x, y + (attached ? 0 : Math.sin(time * .006 + x) * 3));
+  const pulse = 1 + Math.sin(time * .008) * .04;
+  ctx.scale(pulse, pulse);
+  if (attached) {
+    ctx.strokeStyle = "rgba(255,215,67,.68)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([7, 5]);
+    ctx.lineDashOffset = -time * .025;
+    ctx.beginPath();
+    ctx.ellipse(0, -8, 41, 48, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = .18;
+  }
+  const radius = attached ? 34 : 25;
+  const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, radius + 12);
+  glow.addColorStop(0, "rgba(255,245,166,.86)");
+  glow.addColorStop(1, "rgba(255,190,28,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius + 12, 0, Math.PI * 2);
+  ctx.fill();
+  if (!attached) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#ffd33f";
+    ctx.strokeStyle = "#7f5117";
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i += 1) {
+      const angle = -Math.PI / 2 + i * Math.PI / 3;
+      const px = Math.cos(angle) * radius;
+      const py = Math.sin(angle) * radius;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff5b2";
+    ctx.beginPath();
+    ctx.arc(0, -2, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#5b3715";
+    ctx.beginPath();
+    ctx.ellipse(0, 1, 7, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffd13b";
+    ctx.fillRect(-7, -1, 14, 2.5);
+  }
+  ctx.restore();
+}
+
+function drawPollenRain(ctx: CanvasRenderingContext2D, time: number) {
+  ctx.save();
+  for (let i = 0; i < 28; i += 1) {
+    const seed = i * 97.31;
+    const y = (time * .075 + seed) % (HEIGHT + 100) - 50;
+    const x = (i * 71 + Math.sin(time * .0018 + i) * 34 + 600) % WIDTH;
+    const size = 2.2 + (i % 4) * .65;
+    ctx.globalAlpha = .22 + (i % 5) * .09;
+    ctx.fillStyle = i % 3 === 0 ? "#fff3a0" : "#ffd33f";
+    ctx.beginPath();
+    ctx.ellipse(x, y, size, size * 1.65, -.35, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -2219,6 +2399,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const draw = (state: GameState, time: number) => {
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawBackground(state);
+      if (isPollenRainScore(state.honey)) drawPollenRain(ctx, time);
       for (const p of state.platforms) {
         const sy = screenY(p.y, state.cameraY);
         if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) drawPlatform(ctx, p, sy, time);
@@ -2246,6 +2427,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         }
         else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time);
         else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time);
+        else if (item.kind === "waxShield") drawWaxShield(ctx, item.x, sy, time);
         else drawHoneyJar(ctx, item.x, sy, time, item.value);
       }
       for (const p of state.particles) {
@@ -2284,13 +2466,18 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         ctx.fill();
         ctx.restore();
       }
+      if (state.shield > 0) drawWaxShield(ctx, state.beeX, beeY - 2, time, true);
       if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true);
     };
 
     const update = (state: GameState, dt: number) => {
       state.invincible = Math.max(0, state.invincible - dt);
+      state.windTimer = Math.max(0, state.windTimer - dt);
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
       state.copterTimer = Math.max(0, state.copterTimer - dt);
+      const pollenRainNow = isPollenRainScore(state.honey);
+      if (pollenRainNow && !state.pollenRainActive) playGameSound("pollenRain");
+      state.pollenRainActive = pollenRainNow;
       for (const item of state.airItems) {
         const sy = screenY(item.y, state.cameraY);
         if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
@@ -2342,7 +2529,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         const dy = item.y - state.beeY;
         const distance = Math.max(28, Math.hypot(dx, dy));
         if (distance < 150) {
-          const pull = (1 - distance / 150) * 260;
+          const pull = (1 - distance / 150) * 260 * (item.strength ?? 1);
           state.vx += dx / distance * pull * dt;
           state.vy += dy / distance * pull * .45 * dt;
         }
@@ -2354,6 +2541,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       if (state.beeX > WIDTH + 25) state.beeX = -25;
       if (state.rocketTimer > 0) state.vy = ROCKET_SPEED;
       else if (state.copterTimer > 0) state.vy = COPTER_SPEED;
+      else if (state.windTimer > 0) state.vy = WIND_SPEED;
       else state.vy -= GRAVITY * dt;
       state.beeY += state.vy * dt;
       const newFoot = state.beeY - 27;
@@ -2367,16 +2555,30 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         if (landing) {
           const sy = screenY(landing.y, state.cameraY);
           if (landing.kind === "broken") {
-            landing.breaking = .01;
-            playGameSound("break");
-            burst(state, landing.x, sy, "#c7aaa0", 13);
+            if (state.shield > 0) {
+              state.shield = 0;
+              state.beeY = landing.y + 27;
+              state.vy = JUMP_SPEED;
+              landing.kind = "flower";
+              landing.used = true;
+              playGameSound("shield");
+              burst(state, landing.x, sy, "#ffd84d", 20);
+            } else {
+              landing.breaking = .01;
+              playGameSound("break");
+              burst(state, landing.x, sy, "#c7aaa0", 13);
+            }
           } else {
             state.beeY = landing.y + 27;
-            state.vy = landing.kind === "spring" ? SPRING_SPEED : JUMP_SPEED;
+            state.vy = landing.kind === "spring" ? SPRING_SPEED : landing.kind === "windFlower" ? WIND_SPEED : JUMP_SPEED;
+            if (landing.kind === "windFlower") state.windTimer = WIND_FLIGHT_TIME;
             if (landing.kind === "fading") landing.breaking = .01;
             if (!landing.used && landing.kind === "spring") {
               playGameSound("spring");
               burst(state, landing.x, sy, "#fff0a0", 15);
+            } else if (!landing.used && landing.kind === "windFlower") {
+              playGameSound("wind");
+              burst(state, landing.x, sy, "#c9fff0", 18);
             } else playGameSound("bounce");
             landing.used = true;
           }
@@ -2404,6 +2606,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         const sy = screenY(item.y, state.cameraY);
         const hitRadius = item.kind === "honeyJar" ? 37
           : item.kind === "rocket" || item.kind === "bambooCopter" ? 43
+          : item.kind === "waxShield" ? 36
           : item.kind === "blackHole" ? 31
           : item.kind === "bear" ? 38
           : 35;
@@ -2419,16 +2622,24 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           }
           playGameSound("honey");
           burst(state, item.x, sy, "#ffd34d", 18);
+        } else if (item.kind === "waxShield") {
+          item.used = true;
+          state.shield = 1;
+          state.invincible = .55;
+          playGameSound("shield");
+          burst(state, item.x, sy, "#ffe36a", 22);
         } else if (item.kind === "rocket") {
           item.used = true;
           state.rocketTimer = ROCKET_FLIGHT_TIME;
           state.copterTimer = 0;
+          state.windTimer = 0;
           state.vy = ROCKET_SPEED;
           playGameSound("rocket");
           burst(state, item.x, sy, "#ffb62b", 18);
         } else if (item.kind === "bambooCopter") {
           item.used = true;
           state.copterTimer = COPTER_FLIGHT_TIME;
+          state.windTimer = 0;
           state.vy = COPTER_SPEED;
           playGameSound("copter");
           burst(state, item.x, sy, "#8dd477", 18);
@@ -2440,6 +2651,13 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
             state.vy = JUMP_SPEED * .9;
             playGameSound("hit");
             burst(state, item.x, sy, "#ffbd23", 20);
+          } else if (state.shield > 0) {
+            state.shield = 0;
+            state.invincible = 1.1;
+            item.used = true;
+            state.vy = Math.max(state.vy, JUMP_SPEED * .72);
+            playGameSound("shield");
+            burst(state, item.x, sy, "#ffe36a", 24);
           } else {
             state.ended = true;
             state.honey = Math.floor(heightMeters(state.highest)) + state.bonusHoney;
