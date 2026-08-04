@@ -2914,7 +2914,7 @@ export default function Home() {
   const [resetToken, setResetToken] = useState(0);
   const [reviveToken, setReviveToken] = useState(0);
   const [stats, setStats] = useState({ honey: 0, height: 0, ammo: 1 });
-  const [result, setResult] = useState({ honey: 0 });
+  const [result, setResult] = useState({ honey: 0, isRecord: false });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
   const [motionNotice, setMotionNotice] = useState("");
@@ -2948,22 +2948,23 @@ export default function Home() {
     setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.ammo === ammo ? old : { honey, height, ammo });
   }, []);
   const finishRun = useCallback((honey: number) => {
+    const isRecord = honey > best;
     const nextBest = Math.max(best, honey);
     setBest(nextBest);
     localStorage.setItem("honeybee-harvest-v3", String(nextBest));
-    setResult({ honey });
+    setResult({ honey, isRecord });
     setPhase("failed");
   }, [best]);
   const onFail = useCallback((honey: number) => {
     if (finishLock.current) return;
     finishLock.current = true;
-    setResult({ honey });
+    setResult({ honey, isRecord: honey > best });
     if (!reviveUsed.current) {
       setPhase("revive");
       return;
     }
     finishRun(honey);
-  }, [finishRun]);
+  }, [best, finishRun]);
   const continueGame = () => {
     unlockGameAudio();
     reviveUsed.current = true;
@@ -3013,6 +3014,25 @@ export default function Home() {
       startGame();
     }
   };
+
+  const resultTitle = result.isRecord && result.honey >= 300
+    ? "刷新最高纪录！"
+    : result.honey >= 1800
+      ? "花园飞行王！"
+      : result.honey >= 900
+        ? "采蜜高手！"
+        : result.honey >= 300
+          ? "这次飞得不错！"
+          : "再飞一次吧！";
+  const resultDescription = result.isRecord && result.honey >= 300
+    ? "新的采蜜纪录已经写进蜂巢荣誉榜。"
+    : result.honey >= 1800
+      ? "你已经飞过花园中最难的一段。"
+      : result.honey >= 900
+        ? "路线判断越来越稳，继续挑战更高纪录。"
+        : result.honey >= 300
+          ? "已经掌握飞行节奏，再向更高处出发。"
+          : "熟悉花朵节奏，下一次一定能飞得更高。";
 
   return (
     <main className="page-shell">
@@ -3068,8 +3088,8 @@ export default function Home() {
           </div>
           <div className="result-hero-v3" aria-hidden="true" />
           <div className="result-sheet result-sheet-v2">
-            <h2>{result.honey >= best ? "刷新最高纪录！" : "这次飞得不错！"}</h2>
-            <p className="result-copy">{result.honey >= best ? "新的采蜜纪录已经写进蜂巢荣誉榜。" : "花园上空还有更多蜂蜜，休息一下再出发。"}</p>
+            <h2>{resultTitle}</h2>
+            <p className="result-copy">{resultDescription}</p>
             <div className="result-main-score">
               <small>本次采蜜值</small>
               <strong><span className="honey-drop large" />{result.honey}</strong>
