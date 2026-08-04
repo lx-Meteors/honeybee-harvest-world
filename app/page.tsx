@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Phase = "menu" | "playing" | "paused" | "failed";
+type Phase = "menu" | "playing" | "paused" | "revive" | "failed";
 type ControlMode = "motion" | "touch";
 type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fading" | "windFlower";
 type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar" | "waxShield";
-type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shield" | "wind" | "pollenRain" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
+type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shield" | "wind" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
 type IntroductionKind = "moving" | "fading" | "bear" | "hornet" | "web" | "bat" | "blackHole";
 
 type Platform = {
@@ -69,7 +69,6 @@ type GameState = {
   nextId: number;
   invincible: number;
   windTimer: number;
-  pollenRainActive: boolean;
   rocketTimer: number;
   copterTimer: number;
   lastTime: number;
@@ -96,9 +95,6 @@ const COPTER_FLIGHT_TIME = 1.45;
 const COPTER_RECOVERY_DISTANCE = 1380;
 const WIND_FLIGHT_TIME = .72;
 const WIND_SPEED = 735;
-const POLLEN_RAIN_START = 700;
-const POLLEN_RAIN_INTERVAL = 800;
-const POLLEN_RAIN_SPAN = 180;
 const SFX_VOLUME = .66;
 
 let sharedAudioContext: AudioContext | null = null;
@@ -246,9 +242,6 @@ function playSynthSound(kind: SoundKind) {
   } else if (kind === "wind") {
     noise(.6, "bandpass", 480, 1700, .035, 0, .08);
     tone(420, 760, .34, "sine", .018, .04);
-  } else if (kind === "pollenRain") {
-    tone(659, 988, .24, "sine", .018);
-    tone(784, 1318, .25, "sine", .014, .12);
   } else if (kind === "rocket") {
     noise(1.05, "lowpass", 420, 1250, .052, 0, .08);
     tone(72, 185, .7, "sawtooth", .024);
@@ -412,11 +405,6 @@ function heightMeters(worldY: number) {
   return Math.max(0, (worldY - 48) / HEIGHT_SCALE);
 }
 
-function isPollenRainScore(score: number) {
-  if (score < POLLEN_RAIN_START) return false;
-  return (score - POLLEN_RAIN_START) % POLLEN_RAIN_INTERVAL < POLLEN_RAIN_SPAN;
-}
-
 function firstState(): GameState {
   return {
     beeX: WIDTH / 2,
@@ -467,7 +455,6 @@ function firstState(): GameState {
     nextId: 1,
     invincible: 0,
     windTimer: 0,
-    pollenRainActive: false,
     rocketTimer: 0,
     copterTimer: 0,
     lastTime: 0,
@@ -1473,9 +1460,8 @@ function generateWorld(state: GameState, targetY: number) {
     const rocketPlaced = placeBoost("rocket", state.nextRocketY);
     if (!rocketPlaced) placeBoost("bambooCopter", state.nextCopterY);
 
-    const pollenRain = isPollenRainScore(meters);
     const firstJarDue = state.lastJarStep < 0;
-    if (meters > 55 && safeField.length > 0 && (firstJarDue || Math.random() < (pollenRain ? .68 : .24))) {
+    if (meters > 55 && safeField.length > 0 && (firstJarDue || Math.random() < .24)) {
       const jarPlatform = safeField[Math.floor(Math.random() * safeField.length)];
       if (!state.airItems.some((item) => Math.abs(item.y - jarPlatform.y) < 90)) {
         state.airItems.push({
@@ -2042,69 +2028,141 @@ function drawHoneyJar(ctx: CanvasRenderingContext2D, x: number, y: number, time:
 function drawWaxShield(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, attached = false) {
   ctx.save();
   ctx.translate(x, y + (attached ? 0 : Math.sin(time * .006 + x) * 3));
-  const pulse = 1 + Math.sin(time * .008) * .04;
+  const pulse = 1 + Math.sin(time * .008) * (attached ? .025 : .05);
   ctx.scale(pulse, pulse);
+
   if (attached) {
-    ctx.strokeStyle = "rgba(255,215,67,.68)";
-    ctx.lineWidth = 3;
-    ctx.setLineDash([7, 5]);
-    ctx.lineDashOffset = -time * .025;
+    const aura = ctx.createRadialGradient(-9, -19, 4, 0, -5, 59);
+    aura.addColorStop(0, "rgba(255,255,223,.34)");
+    aura.addColorStop(.62, "rgba(255,220,70,.19)");
+    aura.addColorStop(1, "rgba(255,176,18,0)");
+    ctx.fillStyle = aura;
     ctx.beginPath();
-    ctx.ellipse(0, -8, 41, 48, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -7, 55, 61, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,239,118,.13)";
+    ctx.strokeStyle = "rgba(255,250,205,.98)";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.ellipse(0, -7, 47, 54, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = .18;
-  }
-  const radius = attached ? 34 : 25;
-  const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, radius + 12);
-  glow.addColorStop(0, "rgba(255,245,166,.86)");
-  glow.addColorStop(1, "rgba(255,190,28,0)");
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(0, 0, radius + 12, 0, Math.PI * 2);
-  ctx.fill();
-  if (!attached) {
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = "#ffd33f";
-    ctx.strokeStyle = "#7f5117";
-    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = "#f1ae18";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,.9)";
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    for (let i = 0; i < 6; i += 1) {
-      const angle = -Math.PI / 2 + i * Math.PI / 3;
-      const px = Math.cos(angle) * radius;
-      const py = Math.sin(angle) * radius;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    ctx.arc(-4, -9, 42, Math.PI * 1.08, Math.PI * 1.72);
+    ctx.stroke();
+
+    ctx.globalAlpha = .72;
+    ctx.strokeStyle = "#ffd84d";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i += 1) {
+      const angle = time * .0015 + i * Math.PI / 2;
+      const hx = Math.cos(angle) * 43;
+      const hy = -7 + Math.sin(angle) * 49;
+      ctx.beginPath();
+      for (let side = 0; side < 6; side += 1) {
+        const a = side * Math.PI / 3;
+        const px = hx + Math.cos(a) * 5;
+        const py = hy + Math.sin(a) * 5;
+        if (side === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
     }
+    ctx.globalAlpha = 1;
+
+    // A small, unmistakable shield badge stays attached to the bubble.
+    ctx.translate(35, 29);
+    ctx.fillStyle = "#f5b51d";
+    ctx.strokeStyle = "#fff9d4";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.lineTo(11, -7);
+    ctx.lineTo(9, 5);
+    ctx.quadraticCurveTo(6, 13, 0, 16);
+    ctx.quadraticCurveTo(-6, 13, -9, 5);
+    ctx.lineTo(-11, -7);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = "#fff5b2";
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2.4;
     ctx.beginPath();
-    ctx.arc(0, -2, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#5b3715";
-    ctx.beginPath();
-    ctx.ellipse(0, 1, 7, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffd13b";
-    ctx.fillRect(-7, -1, 14, 2.5);
+    ctx.moveTo(-5, 1);
+    ctx.lineTo(-1, 6);
+    ctx.lineTo(6, -3);
+    ctx.stroke();
+    ctx.restore();
+    return;
   }
-  ctx.restore();
-}
 
-function drawPollenRain(ctx: CanvasRenderingContext2D, time: number) {
-  ctx.save();
-  for (let i = 0; i < 28; i += 1) {
-    const seed = i * 97.31;
-    const y = (time * .075 + seed) % (HEIGHT + 100) - 50;
-    const x = (i * 71 + Math.sin(time * .0018 + i) * 34 + 600) % WIDTH;
-    const size = 2.2 + (i % 4) * .65;
-    ctx.globalAlpha = .22 + (i % 5) * .09;
-    ctx.fillStyle = i % 3 === 0 ? "#fff3a0" : "#ffd33f";
-    ctx.beginPath();
-    ctx.ellipse(x, y, size, size * 1.65, -.35, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  const glow = ctx.createRadialGradient(0, -2, 3, 0, 0, 40);
+  glow.addColorStop(0, "rgba(255,251,201,.95)");
+  glow.addColorStop(.55, "rgba(255,211,58,.42)");
+  glow.addColorStop(1, "rgba(255,178,18,0)");
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(0, 0, 40, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(157,231,255,.48)";
+  ctx.strokeStyle = "#fffbea";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(0, -2, 29, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "#e59a11";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const shieldGradient = ctx.createLinearGradient(0, -23, 0, 23);
+  shieldGradient.addColorStop(0, "#ffe76a");
+  shieldGradient.addColorStop(1, "#f2a716");
+  ctx.fillStyle = shieldGradient;
+  ctx.strokeStyle = "#704416";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -21);
+  ctx.lineTo(19, -14);
+  ctx.lineTo(16, 7);
+  ctx.quadraticCurveTo(11, 21, 0, 26);
+  ctx.quadraticCurveTo(-11, 21, -16, 7);
+  ctx.lineTo(-19, -14);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = "#fffbea";
+  ctx.lineWidth = 3.5;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(-8, 0);
+  ctx.lineTo(-2, 7);
+  ctx.lineTo(10, -7);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(92,58,16,.86)";
+  roundedRect(ctx, -25, 31, 50, 18, 9);
+  ctx.fill();
+  ctx.fillStyle = "#fff8d9";
+  ctx.font = "900 12px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("护盾", 0, 40);
+
+  ctx.fillStyle = "rgba(255,255,255,.82)";
+  ctx.beginPath();
+  ctx.ellipse(-10, -13, 5, 9, -.65, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -2299,10 +2357,11 @@ function drawBeeSprite(ctx: CanvasRenderingContext2D, image: HTMLImageElement, x
   ctx.restore();
 }
 
-function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionDetected }: {
+function GameCanvas({ phase, controlMode, resetToken, reviveToken, onStats, onFail, onMotionDetected }: {
   phase: Phase;
   controlMode: ControlMode;
   resetToken: number;
+  reviveToken: number;
   onStats: (honey: number, height: number, ammo: number) => void;
   onFail: (honey: number) => void;
   onMotionDetected: () => void;
@@ -2334,6 +2393,53 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     orientationRef.current.calibrated = false;
     orientationRef.current.reported = false;
   }, [resetToken]);
+  useEffect(() => {
+    if (reviveToken <= 0) return;
+    const state = stateRef.current;
+    const targetY = state.cameraY + 275;
+    let recovery = state.platforms
+      .filter((platform) => (
+        isLandingPlatform(platform)
+        && platform.y > state.cameraY + 95
+        && platform.y < state.cameraY + 610
+        && platform.kind !== "fading"
+      ))
+      .sort((a, b) => Math.abs(a.y - targetY) - Math.abs(b.y - targetY))[0];
+
+    if (!recovery) {
+      recovery = {
+        id: state.nextId++,
+        x: WIDTH / 2,
+        y: targetY,
+        width: 96,
+        kind: "flower",
+        used: true,
+        breaking: 0,
+      };
+      state.platforms.push(recovery);
+    }
+
+    state.beeX = recovery.x;
+    state.beeY = recovery.y + 31;
+    state.vx = 0;
+    state.vy = JUMP_SPEED;
+    state.ended = false;
+    state.invincible = 2.2;
+    state.shield = 1;
+    state.lastTime = 0;
+    state.airItems.forEach((item) => {
+      const dangerous = item.kind === "bear"
+        || item.kind === "hornet"
+        || item.kind === "bat"
+        || item.kind === "web"
+        || item.kind === "blackHole";
+      const closeToRecovery = Math.abs(item.y - recovery.y) < 190
+        && Math.min(Math.abs(item.x - recovery.x), WIDTH - Math.abs(item.x - recovery.x)) < 155;
+      if (dangerous && closeToRecovery) item.used = true;
+    });
+    playGameSound("shield");
+    burst(state, recovery.x, screenY(recovery.y, state.cameraY), "#ffe878", 28);
+  }, [reviveToken]);
   useEffect(() => {
     const beeImage = new Image();
     const redMonsterImage = new Image();
@@ -2452,7 +2558,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const draw = (state: GameState, time: number) => {
       ctx.clearRect(0, 0, WIDTH, HEIGHT);
       drawBackground(state);
-      if (isPollenRainScore(state.honey)) drawPollenRain(ctx, time);
       for (const p of state.platforms) {
         const sy = screenY(p.y, state.cameraY);
         if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) drawPlatform(ctx, p, sy, time);
@@ -2528,9 +2633,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       state.windTimer = Math.max(0, state.windTimer - dt);
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
       state.copterTimer = Math.max(0, state.copterTimer - dt);
-      const pollenRainNow = isPollenRainScore(state.honey);
-      if (pollenRainNow && !state.pollenRainActive) playGameSound("pollenRain");
-      state.pollenRainActive = pollenRainNow;
       for (const item of state.airItems) {
         const sy = screenY(item.y, state.cameraY);
         if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
@@ -2810,12 +2912,14 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("menu");
   const [controlMode, setControlMode] = useState<ControlMode>("motion");
   const [resetToken, setResetToken] = useState(0);
+  const [reviveToken, setReviveToken] = useState(0);
   const [stats, setStats] = useState({ honey: 0, height: 0, ammo: 1 });
   const [result, setResult] = useState({ honey: 0 });
   const [best, setBest] = useState(0);
   const [motionUnavailable, setMotionUnavailable] = useState(false);
   const [motionNotice, setMotionNotice] = useState("");
   const finishLock = useRef(false);
+  const reviveUsed = useRef(false);
   const motionTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -2843,20 +2947,37 @@ export default function Home() {
   const onStats = useCallback((honey: number, height: number, ammo: number) => {
     setStats((old) => old.honey === honey && Math.floor(old.height) === Math.floor(height) && old.ammo === ammo ? old : { honey, height, ammo });
   }, []);
-  const onFail = useCallback((honey: number) => {
-    if (finishLock.current) return;
-    finishLock.current = true;
+  const finishRun = useCallback((honey: number) => {
     const nextBest = Math.max(best, honey);
     setBest(nextBest);
     localStorage.setItem("honeybee-harvest-v3", String(nextBest));
     setResult({ honey });
     setPhase("failed");
   }, [best]);
+  const onFail = useCallback((honey: number) => {
+    if (finishLock.current) return;
+    finishLock.current = true;
+    setResult({ honey });
+    if (!reviveUsed.current) {
+      setPhase("revive");
+      return;
+    }
+    finishRun(honey);
+  }, [finishRun]);
+  const continueGame = () => {
+    unlockGameAudio();
+    reviveUsed.current = true;
+    finishLock.current = false;
+    setReviveToken((value) => value + 1);
+    setPhase("playing");
+  };
+  const endCurrentRun = () => finishRun(result.honey);
   const startGame = () => {
     unlockGameAudio();
     setBackgroundMusic(true);
     playGameSound("start");
     finishLock.current = false;
+    reviveUsed.current = false;
     setStats({ honey: 0, height: 0, ammo: 1 });
     setResetToken((value) => value + 1);
     setPhase("playing");
@@ -2906,7 +3027,7 @@ export default function Home() {
       </section>
 
       <section className="game-phone">
-        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
+        <GameCanvas phase={phase} controlMode={controlMode} resetToken={resetToken} reviveToken={reviveToken} onStats={onStats} onFail={onFail} onMotionDetected={onMotionDetected} />
         <header className="game-hud" aria-live="polite">
           <div className="hud-pill score-pill"><span className="honey-drop" /><span><small>采蜜值</small><b>{stats.honey}</b></span></div>
         </header>
@@ -2925,6 +3046,17 @@ export default function Home() {
         </div>}
         {phase === "playing" && <button className="pause-button" onClick={() => setPhase("paused")} aria-label="暂停游戏">Ⅱ</button>}
         {phase === "paused" && <div className="game-overlay pause-overlay"><div className="modal-card compact-card"><span className="modal-icon">🌼</span><p className="intro-kicker">休息一下</p><h2>采蜜暂停</h2><p>当前采蜜值已为你保留。</p><button className="primary-button" onClick={() => setPhase("playing")}>继续采蜜</button><button className="text-button" onClick={() => setPhase("menu")}>返回首页</button></div></div>}
+        {phase === "revive" && <div className="game-overlay revive-overlay">
+          <div className="revive-card">
+            <div className="revive-badge" aria-hidden="true"><span>1</span></div>
+            <p className="revive-kicker">本局仅有一次</p>
+            <h2>再给小蜜蜂一次机会</h2>
+            <p className="revive-score">当前采蜜值 <strong>{result.honey}</strong></p>
+            <p className="revive-copy">从附近的安全花朵重新起飞，并获得短暂保护与一层蜂蜡护盾。</p>
+            <button className="revive-primary" type="button" onClick={continueGame}>继续飞行</button>
+            <button className="revive-secondary" type="button" onClick={endCurrentRun}>结束本局</button>
+          </div>
+        </div>}
         {phase === "failed" && <div className="game-overlay result-overlay result-overlay-v2">
           <div className="result-float-layer" aria-hidden="true">
             <i className="result-float result-drop float-one" />
