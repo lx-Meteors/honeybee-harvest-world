@@ -1570,7 +1570,14 @@ function generateWorld(state: GameState, targetY: number) {
   }
 }
 
-function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, time: number) {
+function drawPlatform(
+  ctx: CanvasRenderingContext2D,
+  p: Platform,
+  sy: number,
+  time: number,
+  flowerImage: HTMLImageElement | null,
+  springFlowerImage: HTMLImageElement | null,
+) {
   const shake = p.breaking > 0 ? Math.sin(time * 0.09) * 5 : 0;
   ctx.save();
   if (p.kind === "fading") ctx.globalAlpha = Math.max(.12, 1 - p.breaking * 2.7);
@@ -1606,6 +1613,92 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
   const moving = p.kind === "moving";
   const fading = p.kind === "fading";
   const windFlower = p.kind === "windFlower";
+  const platformImage = p.kind === "spring" ? springFlowerImage : flowerImage;
+
+  if (platformImage) {
+    const spriteWidth = p.width;
+    const spriteHeight = p.kind === "spring" ? 43 : 36;
+    const spriteX = p.x - spriteWidth / 2;
+    const spriteY = sy - 10;
+
+    ctx.fillStyle = "rgba(68,53,36,.16)";
+    ctx.beginPath();
+    ctx.ellipse(p.x, sy + spriteHeight - 13, spriteWidth * .38, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (moving) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(80,194,235,.88)";
+      ctx.lineWidth = 2;
+      ctx.lineCap = "round";
+      const drift = Math.sin(time * .008) * 3;
+      ctx.beginPath();
+      ctx.moveTo(p.x - spriteWidth * .52 + drift, sy + 18);
+      ctx.lineTo(p.x - spriteWidth * .38 + drift, sy + 18);
+      ctx.moveTo(p.x + spriteWidth * .38 + drift, sy + 18);
+      ctx.lineTo(p.x + spriteWidth * .52 + drift, sy + 18);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (broken) {
+      const gap = 3.5 + p.breaking * 7;
+      for (const side of [-1, 1] as const) {
+        ctx.save();
+        ctx.translate(
+          p.x + side * (spriteWidth / 4 + gap / 2),
+          spriteY + spriteHeight / 2 + (side < 0 ? 1.2 : 2.1),
+        );
+        ctx.rotate(side * (.035 + p.breaking * .08));
+        const sourceX = side < 0 ? 0 : platformImage.naturalWidth / 2;
+        ctx.drawImage(
+          platformImage,
+          sourceX,
+          0,
+          platformImage.naturalWidth / 2,
+          platformImage.naturalHeight,
+          -spriteWidth / 4,
+          -spriteHeight / 2,
+          spriteWidth / 2,
+          spriteHeight,
+        );
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.strokeStyle = "rgba(83,43,39,.78)";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 1, sy - 5);
+      ctx.lineTo(p.x + 2, sy + 1);
+      ctx.lineTo(p.x - 2, sy + 7);
+      ctx.lineTo(p.x + 2, sy + 13);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.drawImage(platformImage, spriteX, spriteY, spriteWidth, spriteHeight);
+    }
+
+    if (windFlower) {
+      const drift = Math.sin(time * .006) * 3;
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,.94)";
+      ctx.lineWidth = 2.1;
+      ctx.lineCap = "round";
+      for (let i = 0; i < 3; i += 1) {
+        const rise = (time * .045 + i * 14) % 38;
+        const windY = sy - 9 - rise;
+        ctx.globalAlpha = .32 + (1 - rise / 38) * .55;
+        ctx.beginPath();
+        ctx.moveTo(p.x - 14 + drift, windY);
+        ctx.bezierCurveTo(p.x - 3, windY - 5, p.x + 5, windY + 5, p.x + 15 - drift, windY - 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    ctx.restore();
+    return;
+  }
   const outline = "#403b38";
   const board = broken ? "#9a765c" : moving ? "#39aee1" : windFlower ? "#67d3c1" : fading ? "#fffdf7" : "#ff8fb1";
   const boardLight = broken ? "#cfad91" : moving ? "#9fe5ff" : windFlower ? "#cafff3" : fading ? "#ffffff" : "#ffd0df";
@@ -1661,27 +1754,19 @@ function drawPlatform(ctx: CanvasRenderingContext2D, p: Platform, sy: number, ti
     }
   }
   if (p.kind === "spring") {
-    const baseY = sy - 7;
-    const spacing = 4.05;
-    const turns = 5;
-    const topY = baseY - (turns - 1) * spacing;
     ctx.save();
+    ctx.fillStyle = "rgba(255,196,44,.42)";
+    ctx.beginPath();
+    ctx.ellipse(p.x, sy - 1, p.width * .46, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#f2a714";
+    ctx.lineWidth = 2.2;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#343434";
-    ctx.lineWidth = 2.05;
-    for (let i = 0; i < turns; i += 1) {
-      const y = baseY - i * spacing;
-      const radiusX = 14.5 - i * .65;
+    for (let i = 0; i < 2; i += 1) {
       ctx.beginPath();
-      ctx.ellipse(p.x, y, radiusX, 2.35, -.035, 0, Math.PI * 2);
+      ctx.arc(p.x, sy - 12 - i * 8, 12 + i * 4, Math.PI * .18, Math.PI * .82);
       ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.moveTo(p.x - 14, baseY);
-    ctx.lineTo(p.x - 11.5, topY);
-    ctx.moveTo(p.x + 14, baseY);
-    ctx.lineTo(p.x + 11.5, topY);
-    ctx.stroke();
     ctx.restore();
   }
   if (windFlower) {
@@ -2000,16 +2085,29 @@ function drawRocket(ctx: CanvasRenderingContext2D, x: number, y: number, time: n
   ctx.restore();
 }
 
-function drawHoneyJar(ctx: CanvasRenderingContext2D, x: number, y: number, time: number, value = 20) {
+function drawHoneyJar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  time: number,
+  honeyJarImage: HTMLImageElement | null,
+) {
   ctx.save();
   ctx.translate(x, y + Math.sin(time * .006 + x) * 3);
-  const glow = ctx.createRadialGradient(0, 3, 2, 0, 3, 34);
-  glow.addColorStop(0, "rgba(255,226,91,.55)");
-  glow.addColorStop(1, "rgba(255,207,52,0)");
+  const glow = ctx.createRadialGradient(0, 2, 2, 0, 2, 30);
+  glow.addColorStop(0, "rgba(255,231,112,.64)");
+  glow.addColorStop(1, "rgba(255,196,29,0)");
   ctx.fillStyle = glow;
   ctx.beginPath();
-  ctx.arc(0, 3, 34, 0, Math.PI * 2);
+  ctx.arc(0, 2, 30, 0, Math.PI * 2);
   ctx.fill();
+  if (honeyJarImage) {
+    const pulse = 1 + Math.sin(time * .008) * .025;
+    ctx.scale(pulse, pulse);
+    ctx.drawImage(honeyJarImage, -23, -23, 46, 47);
+    ctx.restore();
+    return;
+  }
   ctx.fillStyle = "#fff5ce";
   ctx.strokeStyle = "#4a392c";
   ctx.lineWidth = 2.6;
@@ -2026,13 +2124,6 @@ function drawHoneyJar(ctx: CanvasRenderingContext2D, x: number, y: number, time:
   ctx.beginPath();
   ctx.ellipse(-7, -10, 3, 7, .25, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff8dc";
-  ctx.font = "900 11px sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(`+${value}`, 0, 10);
-  ctx.fillStyle = "#7a4c16";
-  ctx.font = "900 10px sans-serif";
-  ctx.fillText("蜂蜜", 0, 34);
   ctx.restore();
 }
 
@@ -2385,6 +2476,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   const purpleMonsterImageRef = useRef<HTMLImageElement | null>(null);
   const blueMonsterImageRef = useRef<HTMLImageElement | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+  const flowerPlatformImageRef = useRef<HTMLImageElement | null>(null);
+  const springFlowerImageRef = useRef<HTMLImageElement | null>(null);
+  const honeyJarImageRef = useRef<HTMLImageElement | null>(null);
   const orientationRef = useRef({ tilt: 0, baseline: 0, calibrated: false, reported: false });
   const pointerRef = useRef({ active: false, x: WIDTH / 2, startX: WIDTH / 2, startTime: 0, moved: false });
   const keysRef = useRef({ left: false, right: false });
@@ -2409,6 +2503,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const purpleMonsterImage = new Image();
     const blueMonsterImage = new Image();
     const backgroundImage = new Image();
+    const flowerPlatformImage = new Image();
+    const springFlowerImage = new Image();
+    const honeyJarImage = new Image();
     const markBeeReady = () => {
       if (beeImage.naturalWidth > 0) beeImageRef.current = beeImage;
     };
@@ -2420,18 +2517,30 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     purpleMonsterImage.src = "/monster-purple-jelly.png?v=20260730b";
     blueMonsterImage.src = "/monster-blue-cyclops.png?v=20260730b";
     backgroundImage.src = "/game-background-long.png";
+    flowerPlatformImage.src = "/flower-platform-3d-v1.png?v=20260804";
+    springFlowerImage.src = "/spring-flower-3d-v1.png?v=20260804";
+    honeyJarImage.src = "/honey-jar-3d-v1.png?v=20260804";
     if (beeImage.complete) markBeeReady();
     void beeImage.decode().then(markBeeReady).catch(() => undefined);
     redMonsterImage.onload = () => { redMonsterImageRef.current = redMonsterImage; };
     purpleMonsterImage.onload = () => { purpleMonsterImageRef.current = purpleMonsterImage; };
     blueMonsterImage.onload = () => { blueMonsterImageRef.current = blueMonsterImage; };
     backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
+    flowerPlatformImage.onload = () => { flowerPlatformImageRef.current = flowerPlatformImage; };
+    springFlowerImage.onload = () => { springFlowerImageRef.current = springFlowerImage; };
+    honeyJarImage.onload = () => { honeyJarImageRef.current = honeyJarImage; };
+    if (flowerPlatformImage.complete && flowerPlatformImage.naturalWidth > 0) flowerPlatformImageRef.current = flowerPlatformImage;
+    if (springFlowerImage.complete && springFlowerImage.naturalWidth > 0) springFlowerImageRef.current = springFlowerImage;
+    if (honeyJarImage.complete && honeyJarImage.naturalWidth > 0) honeyJarImageRef.current = honeyJarImage;
     return () => {
       beeImageRef.current = null;
       redMonsterImageRef.current = null;
       purpleMonsterImageRef.current = null;
       blueMonsterImageRef.current = null;
       backgroundImageRef.current = null;
+      flowerPlatformImageRef.current = null;
+      springFlowerImageRef.current = null;
+      honeyJarImageRef.current = null;
     };
   }, []);
 
@@ -2523,7 +2632,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       drawBackground(state);
       for (const p of state.platforms) {
         const sy = screenY(p.y, state.cameraY);
-        if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) drawPlatform(ctx, p, sy, time);
+        if (sy > -70 && sy < HEIGHT + 60 && p.breaking < .38) {
+          drawPlatform(ctx, p, sy, time, flowerPlatformImageRef.current, springFlowerImageRef.current);
+        }
       }
       for (const item of state.airItems) {
         if (item.used) continue;
@@ -2549,7 +2660,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time);
         else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time);
         else if (item.kind === "waxShield") drawWaxShield(ctx, item.x, sy, time);
-        else drawHoneyJar(ctx, item.x, sy, time, item.value);
+        else drawHoneyJar(ctx, item.x, sy, time, honeyJarImageRef.current);
       }
       for (const p of state.particles) {
         ctx.globalAlpha = Math.max(0, p.life);
