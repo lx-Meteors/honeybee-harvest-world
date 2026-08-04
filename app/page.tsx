@@ -77,6 +77,7 @@ type GameState = {
 
 const WIDTH = 540;
 const HEIGHT = 720;
+const PLATFORM_WIDTH = 78;
 const FLOOR_Y = HEIGHT - 74;
 const GRAVITY = 1070;
 const JUMP_SPEED = 795;
@@ -416,7 +417,7 @@ function firstState(): GameState {
     honey: 0,
     bonusHoney: 0,
     highest: 48,
-    platforms: [{ id: 0, x: WIDTH / 2, y: 16, width: 82, kind: "flower", used: true, breaking: 0 }],
+    platforms: [{ id: 0, x: WIDTH / 2, y: 16, width: PLATFORM_WIDTH, kind: "flower", used: true, breaking: 0 }],
     airItems: [],
     particles: [],
     shots: [],
@@ -1198,7 +1199,7 @@ function generateWorld(state: GameState, targetY: number) {
         Math.abs(platform.y - y) >= 42
         || Math.abs(platform.x - recoveryX) >= (platform.width + 78) / 2 + 18
       )));
-      pushPlatform(recoveryX, y, 78, "flower");
+      pushPlatform(recoveryX, y, PLATFORM_WIDTH, "flower");
       clear();
     };
 
@@ -1216,7 +1217,7 @@ function generateWorld(state: GameState, targetY: number) {
         id: -1,
         x: state.lastPlatformX,
         y: segmentBottom,
-        width: 78,
+        width: PLATFORM_WIDTH,
         kind: "flower",
         used: true,
         breaking: 0,
@@ -1231,8 +1232,6 @@ function generateWorld(state: GameState, targetY: number) {
     const profileGapScale = profile === 0 ? .8 : profile === 2 ? 1.08 : profile === 3 ? 1.02 : profile === 4 ? .94 : 1;
     const baseGapMin = (46 + routeProgress * 48) * profileGapScale;
     const baseGapMax = (66 + routeProgress * 76) * profileGapScale;
-    const platformWidthMin = 86 - routeProgress * 29;
-    const platformWidthMax = 98 - routeProgress * 19;
     const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.04 : 1);
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
     let mainCount = 0;
@@ -1254,11 +1253,7 @@ function generateWorld(state: GameState, targetY: number) {
         const gap = y - platform.y;
         return gap > 34 && gap < 284;
       });
-      const width = clampNumber(
-        randomBetween(platformWidthMin, platformWidthMax) + (profile === 0 ? 4 : 0),
-        54,
-        102,
-      );
+      const width = PLATFORM_WIDTH;
       let x = randomScatterX();
       let placed = false;
 
@@ -1318,7 +1313,7 @@ function generateWorld(state: GameState, targetY: number) {
           : .42 - routeProgress * .2;
       if (Math.random() < branchChance) {
         const branchY = y + randomBetween(38, 74);
-        const branchWidth = clampNumber(width + randomBetween(-10, 6), 52, 92);
+        const branchWidth = PLATFORM_WIDTH;
         const branchSources = reachableNow().filter((platform) => {
           const gap = branchY - platform.y;
           return gap > 34 && gap < 284;
@@ -1342,7 +1337,7 @@ function generateWorld(state: GameState, targetY: number) {
       // Broken boards are tempting extra targets from the beginning, as in the
       // reference, but never replace the only reachable solid board.
       if (Math.random() < .2 + difficulty * .17) {
-        const brokenWidth = clampNumber(randomBetween(56, 72) - difficulty * 7, 48, 72);
+        const brokenWidth = PLATFORM_WIDTH;
         for (let tries = 0; tries < 18; tries += 1) {
           const brokenX = randomBetween(34, WIDTH - 34);
           const brokenY = y + randomBetween(-44, 66);
@@ -1374,11 +1369,7 @@ function generateWorld(state: GameState, targetY: number) {
         randomBetween(maxRouteGap * .7, maxRouteGap * .88),
       );
       const bridgeY = source.y + bridgeGap;
-      const bridgeWidth = clampNumber(
-        randomBetween(platformWidthMin, platformWidthMax),
-        56,
-        100,
-      );
+      const bridgeWidth = PLATFORM_WIDTH;
       const reach = horizontalReachForGap(bridgeGap, difficulty) * .68;
       let placed = false;
 
@@ -1422,7 +1413,7 @@ function generateWorld(state: GameState, targetY: number) {
       const spring = springCandidates[Math.floor(Math.random() * springCandidates.length)];
       if (spring) {
         spring.kind = "spring";
-        spring.width = Math.max(68, spring.width);
+        spring.width = PLATFORM_WIDTH;
         state.springTargetY = spring.y + randomBetween(610, 660);
         state.springTargetX = clampNumber(spring.x + randomBetween(-92, 92), 54, WIDTH - 54);
         state.lastSpringStep = state.routeStep;
