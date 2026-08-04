@@ -42,6 +42,8 @@ next-env.d.ts
 /outputs/
 /work/
 /github-pages-dist/
+/netlify-dist/
+/.netlify/
 /.tools/
 /*.log
 /.devserver-*.ps1
