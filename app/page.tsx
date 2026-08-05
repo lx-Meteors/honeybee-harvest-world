@@ -580,6 +580,13 @@ function horizontalReachForGap(gap: number, difficulty: number) {
   return clampNumber(flightTime * (220 + difficulty * 36), 138, 318);
 }
 
+function routeHorizontalReachForGap(gap: number, difficulty: number) {
+  // Generated routes should use a comfortable portion of the bee's physical
+  // reach. The spare margin absorbs imperfect phone tilt and grows gradually
+  // smaller as the score rises, instead of creating a sudden precision wall.
+  return horizontalReachForGap(gap, difficulty) * (.66 + difficulty * .16);
+}
+
 function nextFieldX(state: GameState, y: number, difficulty: number, preferredRange?: [number, number]) {
   const minX = preferredRange?.[0] ?? 40;
   const maxX = preferredRange?.[1] ?? WIDTH - 40;
@@ -868,9 +875,11 @@ function canJumpBetween(from: Platform, to: Platform, difficulty: number) {
   const verticalGap = to.y - from.y;
   if (verticalGap <= 34 || verticalGap >= 278) return false;
   const directDistance = Math.abs(to.x - from.x);
-  const wrappedDistance = WIDTH - directDistance;
   const landingAllowance = Math.min(28, (from.width + to.width) * .18);
-  return Math.min(directDistance, wrappedDistance) <= horizontalReachForGap(verticalGap, difficulty) + landingAllowance;
+  // Screen wrapping remains a player technique, but it must never be the only
+  // route the generator considers valid. That produced visually impossible
+  // left-edge to right-edge jumps around 1000 points.
+  return directDistance <= routeHorizontalReachForGap(verticalGap, difficulty) + landingAllowance;
 }
 
 function reachablePlatforms(starts: Platform[], field: Platform[], difficulty: number) {
@@ -1212,13 +1221,19 @@ function generateWorld(state: GameState, targetY: number) {
     // 4 moving-board pocket. Never repeat a sparse pocket directly.
     const profileRoll = Math.random();
     let profile = 1;
-    // The opening must teach steering before asking for precision. Sparse and
-    // edge-biased fields therefore unlock gradually instead of being selected
-    // by the global difficulty value during the first few hundred points.
-    if (profileRoll < .27 - difficulty * .1) profile = 0;
-    else if (meters > 1500 && profileRoll < .38 + difficulty * .08) profile = 2;
-    else if (meters > 1100 && profileRoll < .5 + difficulty * .08) profile = 3;
-    else if (meters > 800 && profileRoll < .66 + difficulty * .08) profile = 4;
+    // Scene types unlock in narrow, overlapping bands. In particular, edge
+    // and sparse pockets no longer switch on together around 1000 points.
+    if (meters < 450) {
+      profile = profileRoll < .42 ? 0 : 1;
+    } else if (meters < 950) {
+      profile = profileRoll < .3 ? 0 : profileRoll < .82 ? 1 : 4;
+    } else if (meters < 1650) {
+      profile = profileRoll < .25 ? 0 : profileRoll < .72 ? 1 : profileRoll < .94 ? 4 : 3;
+    } else if (meters < 2300) {
+      profile = profileRoll < .2 ? 0 : profileRoll < .58 ? 1 : profileRoll < .78 ? 4 : profileRoll < .95 ? 3 : 2;
+    } else {
+      profile = profileRoll < .16 ? 0 : profileRoll < .48 ? 1 : profileRoll < .67 ? 4 : profileRoll < .86 ? 3 : 2;
+    }
     if (profile === 2 && state.routePattern === 2) profile = Math.random() < .5 ? 0 : 1;
     state.routePattern = profile;
 
@@ -1320,7 +1335,7 @@ function generateWorld(state: GameState, targetY: number) {
 
       if (!placed && sourcePool.length > 0) {
         const source = sourcePool[Math.floor(Math.random() * sourcePool.length)];
-        const reach = horizontalReachForGap(y - source.y, difficulty) * .76;
+        const reach = routeHorizontalReachForGap(y - source.y, difficulty) * .92;
         for (let tries = 0; tries < 18; tries += 1) {
           x = clampNumber(source.x + randomBetween(-reach, reach), width / 2 + 7, WIDTH - width / 2 - 7);
           if (!platformPlacementOverlaps(field, x, y, width)) {
@@ -1344,7 +1359,9 @@ function generateWorld(state: GameState, targetY: number) {
         state.introduced.moving = true;
       } else if (meters >= state.nextWindFlowerScore) {
         kind = "windFlower";
-        state.nextWindFlowerScore += randomBetween(480, 680);
+        state.nextWindFlowerScore += meters >= 1000
+          ? randomBetween(390, 540)
+          : randomBetween(480, 650);
       } else if (meters >= 250 && Math.random() < movingRate) {
         kind = "moving";
         state.introduced.moving = true;
@@ -1358,9 +1375,10 @@ function generateWorld(state: GameState, targetY: number) {
 
       // Alternate landing points are offset in both axes, never visually stacked.
       const branchChance = profile === 0
-        ? .31 - routeProgress * .08
-        : profile === 2 ? .07
-          : .24 - routeProgress * .06;
+        ? .34 - routeProgress * .08
+        : profile === 2 ? .12
+          : profile === 3 ? .19
+            : .27 - routeProgress * .06;
       if (Math.random() < branchChance) {
         const branchY = y + randomBetween(54, 88);
         const branchWidth = PLATFORM_WIDTH;
@@ -1420,7 +1438,7 @@ function generateWorld(state: GameState, targetY: number) {
       );
       const bridgeY = source.y + bridgeGap;
       const bridgeWidth = PLATFORM_WIDTH;
-      const reach = horizontalReachForGap(bridgeGap, difficulty) * .68;
+      const reach = routeHorizontalReachForGap(bridgeGap, difficulty) * .9;
       let placed = false;
 
       for (let tries = 0; tries < 28; tries += 1) {
@@ -1448,7 +1466,7 @@ function generateWorld(state: GameState, targetY: number) {
 
     // Springs are visible from the opening screen and recur more often than
     // powered flight, matching the reference video's readable risk/reward mix.
-    const springIntervals = [10, 12, 13, 14, 14, 15];
+    const springIntervals = [10, 11, 11, 10, 10, 11];
     if (
       state.springTargetY <= segmentBottom
       && state.routeStep - state.lastSpringStep >= springIntervals[stage]
@@ -1502,7 +1520,8 @@ function generateWorld(state: GameState, targetY: number) {
     if (!rocketPlaced) placeBoost("bambooCopter", state.nextCopterY);
 
     const firstJarDue = state.lastJarStep < 0;
-    if (meters > 55 && safeField.length > 0 && (firstJarDue || Math.random() < .24)) {
+    const jarChance = meters >= 1000 ? .32 : .24;
+    if (meters > 55 && safeField.length > 0 && (firstJarDue || Math.random() < jarChance)) {
       const jarPlatform = safeField[Math.floor(Math.random() * safeField.length)];
       if (!state.airItems.some((item) => Math.abs(item.y - jarPlatform.y) < 90)) {
         state.airItems.push({
@@ -1531,14 +1550,17 @@ function generateWorld(state: GameState, targetY: number) {
           kind: "waxShield",
           used: false,
         });
-        state.nextShieldScore += randomBetween(680, 900);
+        state.nextShieldScore += meters >= 1000
+          ? randomBetween(520, 720)
+          : randomBetween(680, 860);
       }
     }
 
     // Every core hazard is guaranteed once inside an early score window. Later
     // appearances remain random. Sparse pockets never carry a hazard, so an
     // open jump and a lethal object cannot be combined in the same segment.
-    const enoughRoomSinceHazard = state.routeStep - state.lastHazardStep > Math.round(13 - difficulty * 3);
+    const hazardStepGap = meters < 1000 ? 13 : meters < 2200 ? 10 : 9;
+    const enoughRoomSinceHazard = state.routeStep - state.lastHazardStep > hazardStepGap;
     const hazardUnlocks: Array<[HazardIntroductionKind, number]> = [
       ["bear", 450],
       ["hornet", 700],
@@ -1551,7 +1573,7 @@ function generateWorld(state: GameState, targetY: number) {
     const profileAllowsHazard = profile !== 2 && (!firstBlackHole || profile === 0);
     const hazardChance = meters < 450 || !profileAllowsHazard
       ? 0
-      : .18 + difficulty * .28;
+      : Math.min(.54, .2 + difficulty * .3 + (meters >= 1000 ? .1 : 0));
     if (enoughRoomSinceHazard && (forcedKind !== undefined || Math.random() < hazardChance) && safeField.length >= 4 && profileAllowsHazard) {
       const hazardRoll = Math.random();
       let kind: HazardIntroductionKind = forcedKind ?? "bear";
