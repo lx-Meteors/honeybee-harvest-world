@@ -97,6 +97,9 @@ const COPTER_FLIGHT_TIME = 1.45;
 const COPTER_RECOVERY_DISTANCE = 1380;
 const WIND_FLIGHT_TIME = .72;
 const WIND_SPEED = 735;
+const ENDLESS_RAMP_START = 3200;
+const ENDLESS_RAMP_CAP = 8000;
+const ENDLESS_DIFFICULTY_EXTRA = .15;
 const SFX_VOLUME = .66;
 const MUSIC_VOLUME = .085;
 const DANGER_MUSIC_VOLUME = .012;
@@ -577,7 +580,16 @@ function progressionStageAtHeight(meters: number) {
 }
 
 function linearDifficultyAtHeight(meters: number) {
-  return clampNumber(meters / 3200, 0, 1);
+  const baseDifficulty = clampNumber(meters / ENDLESS_RAMP_START, 0, 1);
+  return baseDifficulty + endlessPressureAtHeight(meters) * ENDLESS_DIFFICULTY_EXTRA;
+}
+
+function endlessPressureAtHeight(meters: number) {
+  return clampNumber(
+    (meters - ENDLESS_RAMP_START) / (ENDLESS_RAMP_CAP - ENDLESS_RAMP_START),
+    0,
+    1,
+  );
 }
 
 function platformPlacementOverlaps(platforms: Platform[], x: number, y: number, width: number) {
@@ -610,16 +622,19 @@ function chooseRouteScene(state: GameState, stage: number) {
 }
 
 function horizontalReachForGap(gap: number, difficulty: number) {
+  const baseDifficulty = clampNumber(difficulty, 0, 1);
   const discriminant = Math.max(0, JUMP_SPEED * JUMP_SPEED - 2 * GRAVITY * gap);
   const flightTime = (JUMP_SPEED + Math.sqrt(discriminant)) / GRAVITY;
-  return clampNumber(flightTime * (220 + difficulty * 36), 138, 318);
+  return clampNumber(flightTime * (220 + baseDifficulty * 36), 138, 318);
 }
 
 function routeHorizontalReachForGap(gap: number, difficulty: number) {
   // Generated routes should use a comfortable portion of the bee's physical
   // reach. The spare margin absorbs imperfect phone tilt and grows gradually
   // smaller as the score rises, instead of creating a sudden precision wall.
-  return horizontalReachForGap(gap, difficulty) * (.66 + difficulty * .16);
+  const baseDifficulty = clampNumber(difficulty, 0, 1);
+  const endlessPressure = clampNumber((difficulty - 1) / ENDLESS_DIFFICULTY_EXTRA, 0, 1);
+  return horizontalReachForGap(gap, baseDifficulty) * (.66 + baseDifficulty * .16 - endlessPressure * .045);
 }
 
 function nextFieldX(state: GameState, y: number, difficulty: number, preferredRange?: [number, number]) {
@@ -1248,6 +1263,7 @@ function generateWorld(state: GameState, targetY: number) {
     const meters = heightMeters(segmentBottom) + state.bonusHoney;
     const stage = progressionStageAtHeight(meters);
     const difficulty = linearDifficultyAtHeight(meters);
+    const endlessPressure = endlessPressureAtHeight(meters);
     const segmentHeight = randomBetween(900, 1080);
     const segmentTop = segmentBottom + segmentHeight;
     const field: Platform[] = [];
@@ -1284,8 +1300,8 @@ function generateWorld(state: GameState, targetY: number) {
       };
       if (kind === "moving" || kind === "cloud") {
         platform.baseX = platform.x;
-        platform.range = 38 + difficulty * 44;
-        platform.speed = .82 + difficulty * .52 + Math.random() * .34;
+        platform.range = 38 + Math.min(1, difficulty) * 44 + endlessPressure * 8;
+        platform.speed = .82 + Math.min(1, difficulty) * .52 + endlessPressure * .22 + Math.random() * .34;
         platform.phase = Math.random() * Math.PI * 2;
       }
       field.push(platform);
@@ -1685,13 +1701,62 @@ function generateWorld(state: GameState, targetY: number) {
         if (!protectedByPoweredFlight) {
           if (isFlightMonster(kind)) {
             item.baseX = item.x;
-            item.range = kind === "bear" ? 34 + difficulty * 28 : 48 + difficulty * 38;
-            item.speed = kind === "bear" ? .82 + difficulty * .38 : 1.08 + difficulty * .62;
+            item.range = kind === "bear"
+              ? 34 + Math.min(1, difficulty) * 28 + endlessPressure * 6
+              : 48 + Math.min(1, difficulty) * 38 + endlessPressure * 8;
+            item.speed = kind === "bear"
+              ? .82 + Math.min(1, difficulty) * .38 + endlessPressure * .16
+              : 1.08 + Math.min(1, difficulty) * .62 + endlessPressure * .2;
             item.phase = Math.random() * Math.PI * 2;
           }
           state.airItems.push(item);
           state.introduced[kind] = true;
           state.lastHazardStep = state.routeStep;
+
+          // After 3200 points, some well-supported regions gain a second,
+          // vertically separated moving enemy. The chance ramps to 25% at
+          // 8000 and then stops. Sparse/edge fields and black-hole encounters
+          // remain single-hazard sections.
+          const comboChance = endlessPressure * .25;
+          if (
+            kind !== "blackHole"
+            && profile !== 2
+            && profile !== 3
+            && safeField.length >= 8
+            && Math.random() < comboChance
+          ) {
+            const stableComboField = ordered.filter((platform) => (
+              platform.kind !== "fading"
+              && platform.kind !== "moving"
+              && Math.abs(platform.y - item.y) > 270
+            ));
+            const comboLower = stableComboField.find((platform, index) => (
+              index > 0
+              && stableComboField.some((upperPlatform) => (
+                upperPlatform.y > platform.y + 70
+                && upperPlatform.y < platform.y + 230
+              ))
+            ));
+            const comboUpper = comboLower
+              ? stableComboField.find((platform) => platform.y > comboLower.y + 70 && platform.y < comboLower.y + 230)
+              : undefined;
+            if (comboLower && comboUpper) {
+              const comboKind: HazardIntroductionKind = kind === "hornet" ? "bear" : "hornet";
+              const comboItem: AirItem = {
+                id: state.nextId++,
+                x: clampNumber((comboLower.x + comboUpper.x) / 2 + randomBetween(-42, 42), 48, WIDTH - 48),
+                y: (comboLower.y + comboUpper.y) / 2,
+                kind: comboKind,
+                used: false,
+                baseX: 0,
+                range: comboKind === "bear" ? 34 + endlessPressure * 32 : 48 + endlessPressure * 44,
+                speed: comboKind === "bear" ? 1.2 + endlessPressure * .16 : 1.7 + endlessPressure * .2,
+                phase: Math.random() * Math.PI * 2,
+              };
+              comboItem.baseX = comboItem.x;
+              if (!isInsidePoweredFlightCorridor(state, comboItem.y)) state.airItems.push(comboItem);
+            }
+          }
         }
       }
     }
