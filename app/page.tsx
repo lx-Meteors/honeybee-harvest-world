@@ -532,6 +532,41 @@ function clearPoweredFlightMonsters(state: GameState, startY: number, distance: 
   }
 }
 
+function ensurePoweredFlightExitPlatform(state: GameState) {
+  const landingX = clampNumber(state.beeX, PLATFORM_WIDTH / 2 + 8, WIDTH - PLATFORM_WIDTH / 2 - 8);
+  const landingY = state.beeY - 60;
+  const stableLanding = state.platforms.some((platform) => (
+    (platform.kind === "flower" || platform.kind === "spring")
+    && platform.breaking <= 0
+    && platform.y <= state.beeY - 38
+    && platform.y >= state.beeY - 90
+    && Math.abs(platform.x - landingX) < PLATFORM_WIDTH * .64
+  ));
+
+  if (!stableLanding) {
+    state.platforms = state.platforms.filter((platform) => (
+      Math.abs(platform.y - landingY) >= 42
+      || Math.abs(platform.x - landingX) >= PLATFORM_WIDTH + 18
+    ));
+    state.platforms.push({
+      id: state.nextId++,
+      x: landingX,
+      y: landingY,
+      width: PLATFORM_WIDTH,
+      kind: "flower",
+      used: false,
+      breaking: 0,
+    });
+  }
+
+  // End powered flight in a short, controlled drop over the guaranteed flower
+  // instead of preserving the full rocket velocity for another large arc.
+  state.vx = 0;
+  state.vy = 0;
+  state.rocketRecoveryY = 0;
+  state.copterRecoveryY = 0;
+}
+
 function progressionStageAtHeight(meters: number) {
   return meters < 300 ? 0
     : meters < 650 ? 1
@@ -1483,12 +1518,10 @@ function generateWorld(state: GameState, targetY: number) {
 
     // Springs are visible from the opening screen and recur more often than
     // powered flight, matching the reference video's readable risk/reward mix.
-    const springIntervals = [10, 9, 9, 8, 8, 9];
+    const springIntervals = [8, 8, 8, 7, 7, 8];
     if (
       state.springTargetY <= segmentBottom
       && state.routeStep - state.lastSpringStep >= springIntervals[stage]
-      && segmentTop < state.nextRocketY
-      && segmentTop < state.nextCopterY
     ) {
       const springCandidates = safeField.filter((platform) => (
         platform.kind === "flower"
@@ -2854,8 +2887,14 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const update = (state: GameState, dt: number) => {
       state.invincible = Math.max(0, state.invincible - dt);
       state.windTimer = Math.max(0, state.windTimer - dt);
+      const rocketWasActive = state.rocketTimer > 0;
+      const copterWasActive = state.copterTimer > 0;
       state.rocketTimer = Math.max(0, state.rocketTimer - dt);
       state.copterTimer = Math.max(0, state.copterTimer - dt);
+      if (
+        (rocketWasActive && state.rocketTimer <= 0)
+        || (copterWasActive && state.copterTimer <= 0)
+      ) ensurePoweredFlightExitPlatform(state);
       for (const item of state.airItems) {
         const sy = screenY(item.y, state.cameraY);
         if (!item.used && !item.audioPlayed && item.kind === "bear" && sy > -190 && sy < -72) {
