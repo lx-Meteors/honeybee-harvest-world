@@ -12,11 +12,11 @@ SAMPLE_RATE = 24_000
 OUTPUT = Path(__file__).resolve().parents[1] / "public" / "sfx"
 
 
-def write_loop(name: str, duration: float, sample_fn) -> None:
+def write_loop(name: str, duration: float, sample_fn, target_peak: float = 0.86) -> None:
     frame_count = round(SAMPLE_RATE * duration)
     samples = [sample_fn(index / SAMPLE_RATE, duration) for index in range(frame_count)]
     peak = max(abs(sample) for sample in samples) or 1
-    gain = 0.86 / peak
+    gain = target_peak / peak
     pcm = b"".join(struct.pack("<h", round(max(-1, min(1, sample * gain)) * 32767)) for sample in samples)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     with wave.open(str(OUTPUT / name), "wb") as audio:
@@ -37,14 +37,16 @@ def periodic_noise(phase: float) -> float:
 
 def monster_warning(t: float, duration: float) -> float:
     phase = 2 * math.pi * t / duration
-    breath = 0.52 + 0.28 * (1 + math.sin(phase * 2 - 0.7))
-    wobble = 3.6 * math.sin(phase * 2) + 1.4 * math.sin(phase * 5)
-    throat = math.sin(phase * 144 + wobble)
-    growl = 0.48 * math.sin(phase * 288 + wobble * 0.62)
-    call = math.sin(phase * 432 + 2.2 * math.sin(phase * 3))
-    rasp = periodic_noise(phase) * (0.34 + 0.18 * math.sin(phase * 2) ** 2)
-    pulse = max(0, math.sin(phase * 2 - 0.5)) ** 5
-    return breath * (0.48 * throat + 0.2 * growl + 0.14 * call + 0.16 * rasp) + pulse * 0.18
+    # Keep most energy in the 160-620 Hz range so the warning stays clear on
+    # small phone speakers. The old loop concentrated too much energy below
+    # 100 Hz and was easily masked by the background music.
+    pulse = 0.42 + 0.58 * max(0, math.sin(phase * 4 - 0.35)) ** 2
+    wobble = 3.4 * math.sin(phase * 2) + 1.2 * math.sin(phase * 5)
+    throat = math.sin(phase * 330 + wobble)
+    mid_growl = math.sin(phase * 700 + wobble * 0.72)
+    alarm_call = math.sin(phase * 980 + 6.2 * math.sin(phase * 2))
+    rasp = periodic_noise(phase) * (0.28 + 0.2 * pulse)
+    return pulse * (0.34 * throat + 0.3 * mid_growl + 0.25 * alarm_call + 0.11 * rasp)
 
 
 def black_hole(t: float, duration: float) -> float:
@@ -59,5 +61,5 @@ def black_hole(t: float, duration: float) -> float:
 
 
 if __name__ == "__main__":
-    write_loop("monster-warning-v2.wav", 2.4, monster_warning)
+    write_loop("monster-warning-v3.wav", 2.0, monster_warning, target_peak=0.96)
     write_loop("black-hole-v2.wav", 3.2, black_hole)

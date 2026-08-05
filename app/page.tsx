@@ -99,7 +99,7 @@ const WIND_FLIGHT_TIME = .72;
 const WIND_SPEED = 735;
 const SFX_VOLUME = .66;
 const MUSIC_VOLUME = .085;
-const DANGER_MUSIC_VOLUME = .026;
+const DANGER_MUSIC_VOLUME = .012;
 
 let sharedAudioContext: AudioContext | null = null;
 let activeBearDangerLoop: HTMLAudioElement | null = null;
@@ -122,7 +122,7 @@ const SOUND_FILES: Partial<Record<SoundKind, string>> = {
   hit: "/sfx/hit.ogg",
   fail: "/sfx/fail.ogg",
   empty: "/sfx/empty.ogg",
-  bearWarning: "/sfx/monster-warning-v2.wav?v=20260804",
+  bearWarning: "/sfx/monster-warning-v3.wav?v=20260805",
   webWind: "/sfx/web-wind.ogg",
   blackHole: "/sfx/black-hole-v2.wav?v=20260804",
 };
@@ -316,10 +316,10 @@ function setBearDangerSound(active: boolean) {
   syncDangerMusicVolume();
   if (!active && !activeBearDangerLoop && bearSynthTimer === null) return;
   if (active && !activeBearDangerLoop && typeof window !== "undefined") {
-    const loop = new Audio("/sfx/monster-warning-v2.wav?v=20260804");
+    const loop = new Audio("/sfx/monster-warning-v3.wav?v=20260805");
     loop.loop = true;
     loop.preload = "auto";
-    loop.volume = Math.min(1, SFX_VOLUME * 1.28);
+    loop.volume = 1;
     void loop.play().then(stopBearSynthLoop).catch(startBearSynthLoop);
     activeBearDangerLoop = loop;
   } else if (!active && activeBearDangerLoop) {
@@ -2832,7 +2832,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         if (item.used || (item.kind !== "bear" && item.kind !== "hornet" && item.kind !== "bat")) return false;
         const sy = screenY(item.y, state.cameraY);
         const notSafelyPassed = item.y > state.beeY - 90;
-        return sy > -215 && sy < HEIGHT + 70 && notSafelyPassed;
+        return sy > -360 && sy < HEIGHT + 70 && notSafelyPassed;
       });
       setBearDangerSound(bearDangerActive);
       const blackHoleDangerActive = state.airItems.some((item) => {
