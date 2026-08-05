@@ -1260,8 +1260,8 @@ function generateWorld(state: GameState, targetY: number) {
     // and sparse pockets no longer switch on together around 1000 points.
     if (meters < 450) {
       profile = profileRoll < .42 ? 0 : 1;
-    } else if (meters < 950) {
-      profile = profileRoll < .3 ? 0 : profileRoll < .82 ? 1 : 4;
+    } else if (meters < 1000) {
+      profile = profileRoll < .4 ? 0 : profileRoll < .9 ? 1 : 4;
     } else if (meters < 1650) {
       profile = profileRoll < .25 ? 0 : profileRoll < .72 ? 1 : profileRoll < .94 ? 4 : 3;
     } else if (meters < 2300) {
@@ -1330,9 +1330,10 @@ function generateWorld(state: GameState, targetY: number) {
     // arrive after several thousand points.
     const routeProgress = clampNumber(meters / 3200, 0, 1);
     const profileGapScale = profile === 0 ? .9 : profile === 2 ? 1.02 : profile === 3 ? 1.02 : profile === 4 ? .96 : 1;
-    const baseGapMin = (58 + routeProgress * 42) * profileGapScale;
-    const baseGapMax = (82 + routeProgress * 64) * profileGapScale;
-    const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.01 : 1);
+    const openingDensityScale = meters < 1000 ? .9 + meters / 1000 * .06 : 1;
+    const baseGapMin = (58 + routeProgress * 42) * profileGapScale * openingDensityScale;
+    const baseGapMax = (82 + routeProgress * 64) * profileGapScale * openingDensityScale;
+    const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.01 : 1) * openingDensityScale;
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
     let mainCount = 0;
     let lastProgressionKind: PlatformKind = "flower";
@@ -1393,8 +1394,8 @@ function generateWorld(state: GameState, targetY: number) {
       // Approximate four-flower mix after branches/extras:
       // opening 80:10:10:0, midgame 70:10:12:8, late game 62:12:14:12.
       // Sparse pockets lift the white disappearing share to roughly 20%.
-      const fadingRate = meters < 600
-        ? .025
+      const fadingRate = meters < 1000
+        ? 0
         : meters < 1500
           ? .07
           : .075 + difficulty * .055 + (profile === 2 ? .075 : 0);
@@ -1410,7 +1411,7 @@ function generateWorld(state: GameState, targetY: number) {
         kind = "moving";
         state.introduced.moving = true;
       } else if (
-        meters >= 500
+        meters >= 1000
         && lastProgressionKind !== "fading"
         && (!state.introduced.fading || Math.random() < fadingRate)
       ) {
@@ -1423,11 +1424,12 @@ function generateWorld(state: GameState, targetY: number) {
       mainCount += 1;
 
       // Alternate landing points are offset in both axes, never visually stacked.
-      const branchChance = profile === 0
+      const openingBranchBonus = meters < 1000 ? .1 : 0;
+      const branchChance = (profile === 0
         ? .34 - routeProgress * .08
         : profile === 2 ? .25
           : profile === 3 ? .19
-            : .27 - routeProgress * .06;
+            : .27 - routeProgress * .06) + openingBranchBonus;
       if (Math.random() < branchChance) {
         const branchY = y + randomBetween(54, 88);
         const branchWidth = PLATFORM_WIDTH;
@@ -1444,7 +1446,7 @@ function generateWorld(state: GameState, targetY: number) {
             && branchSources.some((source) => canJumpBetween(source, candidate, difficulty))
             && !platformPlacementOverlaps(field, branchX, branchY, branchWidth)
           ) {
-            const branchFading = meters >= 500 && profile === 2 && Math.random() < .72;
+            const branchFading = meters >= 1000 && profile === 2 && Math.random() < .72;
             const branchMoving = !branchFading && meters > 650 && profile === 4 && Math.random() < .38;
             pushPlatform(branchX, branchY, branchWidth, branchFading ? "fading" : branchMoving ? "moving" : "flower");
             if (branchFading) state.introduced.fading = true;
@@ -1518,7 +1520,7 @@ function generateWorld(state: GameState, targetY: number) {
 
     // Springs are visible from the opening screen and recur more often than
     // powered flight, matching the reference video's readable risk/reward mix.
-    const springIntervals = [8, 8, 8, 7, 7, 8];
+    const springIntervals = [7, 7, 7, 6, 6, 7];
     if (
       state.springTargetY <= segmentBottom
       && state.routeStep - state.lastSpringStep >= springIntervals[stage]
@@ -1535,6 +1537,35 @@ function generateWorld(state: GameState, targetY: number) {
         state.springTargetY = spring.y + randomBetween(610, 660);
         state.springTargetX = clampNumber(spring.x + randomBetween(-92, 92), 54, WIDTH - 54);
         state.lastSpringStep = state.routeStep;
+
+        // Some regions carry a second spring. It must be well separated from
+        // the first and gets its own in-segment landing flower, so the extra
+        // variety never creates a blind six-step launch.
+        const extraSpringChance = meters < 1000 ? .38 : .62;
+        if (Math.random() < extraSpringChance) {
+          const extraCandidates = springCandidates.filter((candidate) => (
+            candidate.id !== spring.id
+            && candidate.kind === "flower"
+            && Math.abs(candidate.y - spring.y) > 190
+            && candidate.y + 650 < segmentTop - 34
+          ));
+          const extraSpring = extraCandidates[Math.floor(Math.random() * extraCandidates.length)];
+          if (extraSpring) {
+            extraSpring.kind = "spring";
+            const recoveryY = extraSpring.y + randomBetween(610, 645);
+            const nearbyRecovery = field.find((candidate) => (
+              isLandingPlatform(candidate)
+              && candidate.kind !== "fading"
+              && Math.abs(candidate.y - recoveryY) < 42
+            ));
+            if (!nearbyRecovery) {
+              const recoveryX = clampNumber(extraSpring.x + randomBetween(-88, 88), 54, WIDTH - 54);
+              if (!platformPlacementOverlaps(field, recoveryX, recoveryY, PLATFORM_WIDTH)) {
+                pushPlatform(recoveryX, recoveryY, PLATFORM_WIDTH, "flower");
+              }
+            }
+          }
+        }
       }
     }
 
