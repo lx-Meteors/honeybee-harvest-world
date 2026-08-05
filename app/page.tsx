@@ -1294,12 +1294,13 @@ function generateWorld(state: GameState, targetY: number) {
     // player is still in the generous opening band; the largest gaps only
     // arrive after several thousand points.
     const routeProgress = clampNumber(meters / 3200, 0, 1);
-    const profileGapScale = profile === 0 ? .9 : profile === 2 ? 1.06 : profile === 3 ? 1.02 : profile === 4 ? .96 : 1;
+    const profileGapScale = profile === 0 ? .9 : profile === 2 ? 1.02 : profile === 3 ? 1.02 : profile === 4 ? .96 : 1;
     const baseGapMin = (58 + routeProgress * 42) * profileGapScale;
     const baseGapMax = (82 + routeProgress * 64) * profileGapScale;
-    const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.04 : 1);
+    const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.01 : 1);
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
     let mainCount = 0;
+    let lastProgressionKind: PlatformKind = "flower";
 
     const randomScatterX = () => {
       if (profile === 3 && Math.random() < .78) {
@@ -1354,6 +1355,14 @@ function generateWorld(state: GameState, targetY: number) {
 
       let kind: PlatformKind = "flower";
       const movingRate = profile === 4 ? .34 + difficulty * .15 : .025 + difficulty * .11;
+      // Approximate four-flower mix after branches/extras:
+      // opening 80:10:10:0, midgame 70:10:12:8, late game 62:12:14:12.
+      // Sparse pockets lift the white disappearing share to roughly 20%.
+      const fadingRate = meters < 600
+        ? .025
+        : meters < 1500
+          ? .07
+          : .075 + difficulty * .055 + (profile === 2 ? .075 : 0);
       if (meters >= 250 && !state.introduced.moving) {
         kind = "moving";
         state.introduced.moving = true;
@@ -1365,18 +1374,23 @@ function generateWorld(state: GameState, targetY: number) {
       } else if (meters >= 250 && Math.random() < movingRate) {
         kind = "moving";
         state.introduced.moving = true;
-      } else if (meters >= 1200 && (!state.introduced.fading || Math.random() < .025 + difficulty * .1)) {
+      } else if (
+        meters >= 500
+        && lastProgressionKind !== "fading"
+        && (!state.introduced.fading || Math.random() < fadingRate)
+      ) {
         kind = "fading";
         state.introduced.fading = true;
       }
       const main = pushPlatform(x, y, width, kind);
+      lastProgressionKind = kind;
       state.lastPlatformX = main.x;
       mainCount += 1;
 
       // Alternate landing points are offset in both axes, never visually stacked.
       const branchChance = profile === 0
         ? .34 - routeProgress * .08
-        : profile === 2 ? .12
+        : profile === 2 ? .25
           : profile === 3 ? .19
             : .27 - routeProgress * .06;
       if (Math.random() < branchChance) {
@@ -1395,8 +1409,10 @@ function generateWorld(state: GameState, targetY: number) {
             && branchSources.some((source) => canJumpBetween(source, candidate, difficulty))
             && !platformPlacementOverlaps(field, branchX, branchY, branchWidth)
           ) {
-            const branchMoving = meters > 650 && profile === 4 && Math.random() < .38;
-            pushPlatform(branchX, branchY, branchWidth, branchMoving ? "moving" : "flower");
+            const branchFading = meters >= 500 && profile === 2 && Math.random() < .72;
+            const branchMoving = !branchFading && meters > 650 && profile === 4 && Math.random() < .38;
+            pushPlatform(branchX, branchY, branchWidth, branchFading ? "fading" : branchMoving ? "moving" : "flower");
+            if (branchFading) state.introduced.fading = true;
             break;
           }
         }
@@ -1404,7 +1420,8 @@ function generateWorld(state: GameState, targetY: number) {
 
       // Broken boards are tempting extra targets from the beginning, as in the
       // reference, but never replace the only reachable solid board.
-      if (Math.random() < .09 + difficulty * .11) {
+      const brokenChance = .1 + difficulty * .08 + (profile === 2 ? .04 : 0);
+      if (Math.random() < brokenChance) {
         const brokenWidth = PLATFORM_WIDTH;
         for (let tries = 0; tries < 18; tries += 1) {
           const brokenX = randomBetween(34, WIDTH - 34);
@@ -1418,7 +1435,7 @@ function generateWorld(state: GameState, targetY: number) {
 
       let nextGap = randomBetween(baseGapMin, baseGapMax);
       if (profile === 0 && Math.random() < .2) nextGap *= randomBetween(.9, .96);
-      if (profile === 2 && Math.random() < .42) nextGap *= randomBetween(1.08, 1.22);
+      if (profile === 2 && Math.random() < .35) nextGap *= randomBetween(1.03, 1.1);
       y += clampNumber(nextGap, 54, maxRouteGap);
     }
 
@@ -1466,7 +1483,7 @@ function generateWorld(state: GameState, targetY: number) {
 
     // Springs are visible from the opening screen and recur more often than
     // powered flight, matching the reference video's readable risk/reward mix.
-    const springIntervals = [10, 11, 11, 10, 10, 11];
+    const springIntervals = [10, 9, 9, 8, 8, 9];
     if (
       state.springTargetY <= segmentBottom
       && state.routeStep - state.lastSpringStep >= springIntervals[stage]
