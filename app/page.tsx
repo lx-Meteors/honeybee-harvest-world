@@ -1250,8 +1250,8 @@ function generateWorld(state: GameState, targetY: number) {
     // arrive after several thousand points.
     const routeProgress = clampNumber(meters / 3200, 0, 1);
     const profileGapScale = profile === 0 ? .9 : profile === 2 ? 1.06 : profile === 3 ? 1.02 : profile === 4 ? .96 : 1;
-    const baseGapMin = (64 + routeProgress * 42) * profileGapScale;
-    const baseGapMax = (88 + routeProgress * 66) * profileGapScale;
+    const baseGapMin = (58 + routeProgress * 42) * profileGapScale;
+    const baseGapMax = (82 + routeProgress * 64) * profileGapScale;
     const maxRouteGap = (78 + routeProgress * 74) * (profile === 2 ? 1.04 : 1);
     let y = segmentBottom + randomBetween(baseGapMin, baseGapMax);
     let mainCount = 0;
@@ -1328,11 +1328,11 @@ function generateWorld(state: GameState, targetY: number) {
 
       // Alternate landing points are offset in both axes, never visually stacked.
       const branchChance = profile === 0
-        ? .24 - routeProgress * .07
-        : profile === 2 ? .06
-          : .18 - routeProgress * .05;
+        ? .31 - routeProgress * .08
+        : profile === 2 ? .07
+          : .24 - routeProgress * .06;
       if (Math.random() < branchChance) {
-        const branchY = y + randomBetween(56, 94);
+        const branchY = y + randomBetween(54, 88);
         const branchWidth = PLATFORM_WIDTH;
         const branchSources = reachableNow().filter((platform) => {
           const gap = branchY - platform.y;
@@ -2579,7 +2579,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     bambooCopterImage.src = "/bamboo-copter-silver-v1.png?v=20260804";
     backgroundImage.src = "/game-background-long.png";
     flowerPlatformImage.src = "/flower-platform-3d-v1.png?v=20260804";
-    springFlowerImage.src = "/spring-flower-blue-v2.png?v=20260804";
+    springFlowerImage.src = "/spring-flower-honey-v3.png?v=20260805";
     brokenFlowerImage.src = "/broken-flower-orange-v1.png?v=20260804";
     fadingFlowerImage.src = "/fading-flower-white-v1.png?v=20260804";
     honeyJarImage.src = "/honey-jar-3d-v1.png?v=20260804";
