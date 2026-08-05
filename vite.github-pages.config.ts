@@ -20,6 +20,7 @@ function rewritePublicAssetPaths(): Plugin {
             .replaceAll('"/enemy-', `"${publicBase}enemy-`)
             .replaceAll('"/rocket-gold-', `"${publicBase}rocket-gold-`)
             .replaceAll('"/bamboo-copter-', `"${publicBase}bamboo-copter-`)
+            .replaceAll('"/silver-wings-', `"${publicBase}silver-wings-`)
             .replaceAll('"/flower-platform-', `"${publicBase}flower-platform-`)
             .replaceAll('"/spring-flower-', `"${publicBase}spring-flower-`)
             .replaceAll('"/broken-flower-', `"${publicBase}broken-flower-`)

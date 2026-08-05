@@ -987,7 +987,7 @@ button { font: inherit; }
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: url('/cover-garden-v2.png') center / cover no-repeat;
+  background: url('/cover-garden-v3.png?v=20260805') center / cover no-repeat;
   box-shadow: none;
 }
 .cover-frame-v2::before,
@@ -1102,7 +1102,7 @@ button { font: inherit; }
   width: 82%;
   height: 31%;
   transform: translateX(-50%);
-  background: url('/result-emblem-v2.png') center / contain no-repeat;
+  background: url('/result-emblem-v3.png?v=20260805') center / contain no-repeat;
   filter: drop-shadow(0 8px 10px rgba(112,66,9,.2));
   pointer-events: none;
   animation: result-emblem-arrive .55s cubic-bezier(.22,.9,.36,1.2) both;

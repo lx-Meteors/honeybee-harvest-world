@@ -8,6 +8,7 @@ type PlatformKind = "flower" | "broken" | "spring" | "moving" | "cloud" | "fadin
 type AirKind = "bear" | "web" | "blackHole" | "hornet" | "bat" | "rocket" | "bambooCopter" | "honeyJar" | "waxShield";
 type SoundKind = "start" | "bounce" | "spring" | "break" | "honey" | "rocket" | "copter" | "shield" | "wind" | "shoot" | "hit" | "fail" | "empty" | "bearWarning" | "webWind" | "blackHole";
 type IntroductionKind = "moving" | "fading" | "bear" | "hornet" | "web" | "bat" | "blackHole";
+type HazardIntroductionKind = "bear" | "hornet" | "web" | "bat" | "blackHole";
 
 type Platform = {
   id: number;
@@ -500,6 +501,35 @@ function randomBetween(min: number, max: number) {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function isFlightMonster(kind: AirKind | IntroductionKind) {
+  return kind === "bear" || kind === "hornet" || kind === "bat";
+}
+
+function poweredFlightDistance(kind: AirKind) {
+  return kind === "rocket" ? ROCKET_RECOVERY_DISTANCE : COPTER_RECOVERY_DISTANCE;
+}
+
+function isInsidePoweredFlightCorridor(state: GameState, y: number) {
+  const activeDistance = state.rocketTimer > 0
+    ? ROCKET_RECOVERY_DISTANCE
+    : state.copterTimer > 0
+      ? COPTER_RECOVERY_DISTANCE
+      : 0;
+  if (activeDistance > 0 && y >= state.beeY - 100 && y <= state.beeY + activeDistance + 180) return true;
+  return state.airItems.some((item) => (
+    !item.used
+    && (item.kind === "rocket" || item.kind === "bambooCopter")
+    && y >= item.y - 100
+    && y <= item.y + poweredFlightDistance(item.kind) + 180
+  ));
+}
+
+function clearPoweredFlightMonsters(state: GameState, startY: number, distance: number) {
+  for (const item of state.airItems) {
+    if (isFlightMonster(item.kind) && item.y >= startY - 100 && item.y <= startY + distance + 180) item.used = true;
+  }
 }
 
 function progressionStageAtHeight(meters: number) {
@@ -1509,7 +1539,7 @@ function generateWorld(state: GameState, targetY: number) {
     // appearances remain random. Sparse pockets never carry a hazard, so an
     // open jump and a lethal object cannot be combined in the same segment.
     const enoughRoomSinceHazard = state.routeStep - state.lastHazardStep > Math.round(13 - difficulty * 3);
-    const hazardUnlocks: Array<[IntroductionKind, number]> = [
+    const hazardUnlocks: Array<[HazardIntroductionKind, number]> = [
       ["bear", 450],
       ["hornet", 700],
       ["web", 950],
@@ -1524,7 +1554,7 @@ function generateWorld(state: GameState, targetY: number) {
       : .18 + difficulty * .28;
     if (enoughRoomSinceHazard && (forcedKind !== undefined || Math.random() < hazardChance) && safeField.length >= 4 && profileAllowsHazard) {
       const hazardRoll = Math.random();
-      let kind: IntroductionKind = forcedKind ?? "bear";
+      let kind: HazardIntroductionKind = forcedKind ?? "bear";
       if (!forcedKind) {
         if (meters >= 1500 && hazardRoll < .12) kind = "blackHole";
         else if (meters >= 1200 && hazardRoll < .36) kind = "bat";
@@ -1548,15 +1578,18 @@ function generateWorld(state: GameState, targetY: number) {
           used: false,
           strength: kind === "blackHole" && !state.introduced.blackHole ? .7 : 1,
         };
-        if (kind === "bear" || kind === "hornet" || kind === "bat") {
-          item.baseX = item.x;
-          item.range = kind === "bear" ? 34 + difficulty * 28 : 48 + difficulty * 38;
-          item.speed = kind === "bear" ? .82 + difficulty * .38 : 1.08 + difficulty * .62;
-          item.phase = Math.random() * Math.PI * 2;
+        const protectedByPoweredFlight = isFlightMonster(kind) && isInsidePoweredFlightCorridor(state, item.y);
+        if (!protectedByPoweredFlight) {
+          if (isFlightMonster(kind)) {
+            item.baseX = item.x;
+            item.range = kind === "bear" ? 34 + difficulty * 28 : 48 + difficulty * 38;
+            item.speed = kind === "bear" ? .82 + difficulty * .38 : 1.08 + difficulty * .62;
+            item.phase = Math.random() * Math.PI * 2;
+          }
+          state.airItems.push(item);
+          state.introduced[kind] = true;
+          state.lastHazardStep = state.routeStep;
         }
-        state.airItems.push(item);
-        state.introduced[kind] = true;
-        state.lastHazardStep = state.routeStep;
       }
     }
 
@@ -1625,8 +1658,8 @@ function drawPlatform(
 
   if (platformImage) {
     const springPulse = p.kind === "spring" ? (Math.sin(time * .012) + 1) / 2 : 0;
-    const spriteWidth = p.width * (p.kind === "spring" ? .98 + springPulse * .04 : 1);
-    const spriteHeight = p.kind === "spring" ? 46 + springPulse * 3 : 36;
+    const spriteWidth = p.width * (p.kind === "spring" ? 1.06 + springPulse * .04 : 1);
+    const spriteHeight = p.kind === "spring" ? 49 + springPulse * 3 : 36;
     const spriteX = p.x - spriteWidth / 2;
     const spriteY = p.kind === "spring" ? sy - 18 - springPulse * 1.5 : sy - 10;
 
@@ -2018,7 +2051,7 @@ function drawBat(ctx: CanvasRenderingContext2D, x: number, y: number, time: numb
   ctx.restore();
 }
 
-function drawBambooCopter(
+function drawSilverWings(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
@@ -2027,39 +2060,32 @@ function drawBambooCopter(
   image: HTMLImageElement | null = null,
 ) {
   ctx.save();
-  ctx.translate(x, y + (attached ? -39 : Math.sin(time * .009) * 3));
+  ctx.translate(x, y + (attached ? 0 : Math.sin(time * .009) * 3));
   if (image) {
-    const width = attached ? 66 : 61;
+    const width = attached ? 94 : 66;
     const height = width * (image.naturalHeight / image.naturalWidth);
-    const shimmer = .96 + Math.sin(time * .026) * .04;
-    ctx.scale(shimmer, 1);
-    ctx.rotate(Math.sin(time * .018) * .055);
-    ctx.shadowColor = "rgba(255,215,70,.34)";
-    ctx.shadowBlur = 7;
-    ctx.shadowOffsetY = 3;
+    const wingBeat = .96 + Math.sin(time * .032) * .045;
+    ctx.scale(1, wingBeat);
+    if (!attached) ctx.rotate(Math.sin(time * .014) * .035);
+    ctx.shadowColor = "rgba(181,213,236,.48)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
     ctx.drawImage(image, -width / 2, -height / 2, width, height);
     ctx.restore();
     return;
   }
-  ctx.strokeStyle = "#49392c";
-  ctx.lineWidth = 3;
+  ctx.fillStyle = "#eef5fb";
+  ctx.strokeStyle = "#8797aa";
+  ctx.lineWidth = 2.2;
   ctx.beginPath();
-  ctx.moveTo(0, -18);
-  ctx.lineTo(0, 12);
-  ctx.stroke();
-  ctx.fillStyle = "#e5a72a";
-  ctx.beginPath();
-  ctx.ellipse(0, 12, 9, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(-23, 0, 24, 10, -.34, 0, Math.PI * 2);
+  ctx.ellipse(23, 0, 24, 10, .34, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
-  const spin = time * .025;
-  ctx.rotate(spin);
-  ctx.fillStyle = "#73c66e";
+  ctx.fillStyle = "#f3b91f";
   ctx.beginPath();
-  ctx.ellipse(-21, 0, 22, 5, 0, 0, Math.PI * 2);
-  ctx.ellipse(21, 0, 22, 5, 0, 0, Math.PI * 2);
+  ctx.arc(0, 3, 8, 0, Math.PI * 2);
   ctx.fill();
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -2529,7 +2555,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
   const mantisEnemyImageRef = useRef<HTMLImageElement | null>(null);
   const hornetEnemyImageRef = useRef<HTMLImageElement | null>(null);
   const rocketImageRef = useRef<HTMLImageElement | null>(null);
-  const bambooCopterImageRef = useRef<HTMLImageElement | null>(null);
+  const silverWingsImageRef = useRef<HTMLImageElement | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
   const flowerPlatformImageRef = useRef<HTMLImageElement | null>(null);
   const springFlowerImageRef = useRef<HTMLImageElement | null>(null);
@@ -2559,7 +2585,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     const mantisEnemyImage = new Image();
     const hornetEnemyImage = new Image();
     const rocketImage = new Image();
-    const bambooCopterImage = new Image();
+    const silverWingsImage = new Image();
     const backgroundImage = new Image();
     const flowerPlatformImage = new Image();
     const springFlowerImage = new Image();
@@ -2576,11 +2602,11 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     mantisEnemyImage.src = "/enemy-mantis-v1.png?v=20260804";
     hornetEnemyImage.src = "/enemy-hornet-v1.png?v=20260804";
     rocketImage.src = "/rocket-gold-wings-v1.png?v=20260804";
-    bambooCopterImage.src = "/bamboo-copter-silver-v1.png?v=20260804";
+    silverWingsImage.src = "/silver-wings-v2.png?v=20260805b";
     backgroundImage.src = "/game-background-long.png";
     flowerPlatformImage.src = "/flower-platform-3d-v1.png?v=20260804";
     springFlowerImage.src = "/spring-flower-honey-v3.png?v=20260805";
-    brokenFlowerImage.src = "/broken-flower-orange-v1.png?v=20260804";
+    brokenFlowerImage.src = "/broken-flower-berry-v2.png?v=20260805b";
     fadingFlowerImage.src = "/fading-flower-white-v1.png?v=20260804";
     honeyJarImage.src = "/honey-jar-3d-v1.png?v=20260804";
     if (beeImage.complete) markBeeReady();
@@ -2588,7 +2614,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     mantisEnemyImage.onload = () => { mantisEnemyImageRef.current = mantisEnemyImage; };
     hornetEnemyImage.onload = () => { hornetEnemyImageRef.current = hornetEnemyImage; };
     rocketImage.onload = () => { rocketImageRef.current = rocketImage; };
-    bambooCopterImage.onload = () => { bambooCopterImageRef.current = bambooCopterImage; };
+    silverWingsImage.onload = () => { silverWingsImageRef.current = silverWingsImage; };
     backgroundImage.onload = () => { backgroundImageRef.current = backgroundImage; };
     flowerPlatformImage.onload = () => { flowerPlatformImageRef.current = flowerPlatformImage; };
     springFlowerImage.onload = () => { springFlowerImageRef.current = springFlowerImage; };
@@ -2598,7 +2624,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
     if (mantisEnemyImage.complete && mantisEnemyImage.naturalWidth > 0) mantisEnemyImageRef.current = mantisEnemyImage;
     if (hornetEnemyImage.complete && hornetEnemyImage.naturalWidth > 0) hornetEnemyImageRef.current = hornetEnemyImage;
     if (rocketImage.complete && rocketImage.naturalWidth > 0) rocketImageRef.current = rocketImage;
-    if (bambooCopterImage.complete && bambooCopterImage.naturalWidth > 0) bambooCopterImageRef.current = bambooCopterImage;
+    if (silverWingsImage.complete && silverWingsImage.naturalWidth > 0) silverWingsImageRef.current = silverWingsImage;
     if (flowerPlatformImage.complete && flowerPlatformImage.naturalWidth > 0) flowerPlatformImageRef.current = flowerPlatformImage;
     if (springFlowerImage.complete && springFlowerImage.naturalWidth > 0) springFlowerImageRef.current = springFlowerImage;
     if (brokenFlowerImage.complete && brokenFlowerImage.naturalWidth > 0) brokenFlowerImageRef.current = brokenFlowerImage;
@@ -2609,7 +2635,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       mantisEnemyImageRef.current = null;
       hornetEnemyImageRef.current = null;
       rocketImageRef.current = null;
-      bambooCopterImageRef.current = null;
+      silverWingsImageRef.current = null;
       backgroundImageRef.current = null;
       flowerPlatformImageRef.current = null;
       springFlowerImageRef.current = null;
@@ -2742,7 +2768,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           else drawBat(ctx, item.x, sy, time);
         }
         else if (item.kind === "rocket") drawRocket(ctx, item.x, sy, time, rocketImageRef.current);
-        else if (item.kind === "bambooCopter") drawBambooCopter(ctx, item.x, sy, time, false, bambooCopterImageRef.current);
+        else if (item.kind === "bambooCopter") drawSilverWings(ctx, item.x, sy, time, false, silverWingsImageRef.current);
         else if (item.kind === "waxShield") drawWaxShield(ctx, item.x, sy, time);
         else drawHoneyJar(ctx, item.x, sy, time, honeyJarImageRef.current);
       }
@@ -2771,6 +2797,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
       }
       const beeImage = beeImageRef.current;
       const beeY = screenY(state.beeY, state.cameraY);
+      if (state.copterTimer > 0) drawSilverWings(ctx, state.beeX, beeY, time, true, silverWingsImageRef.current);
       if (beeImage) drawBeeSprite(ctx, beeImage, state.beeX, beeY, state.vx, state.vy, time, state.invincible > 0, state.rocketTimer > 0, state.facing);
       else {
         // Do not flash the retired code-drawn bee while the real sprite is decoding.
@@ -2783,7 +2810,6 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
         ctx.restore();
       }
       if (state.shield > 0) drawWaxShield(ctx, state.beeX, beeY - 2, time, true);
-      if (state.copterTimer > 0) drawBambooCopter(ctx, state.beeX, beeY, time, true, bambooCopterImageRef.current);
     };
 
     const update = (state: GameState, dt: number) => {
@@ -2930,6 +2956,11 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           : item.kind === "bear" ? 38
           : 35;
         if (Math.hypot(item.x - state.beeX, sy - beeScreenY) > hitRadius) continue;
+        if ((state.rocketTimer > 0 || state.copterTimer > 0) && isFlightMonster(item.kind)) {
+          item.used = true;
+          burst(state, item.x, sy, state.rocketTimer > 0 ? "#ffd25a" : "#dcebf6", 12);
+          continue;
+        }
         if (item.kind === "honeyJar") {
           item.used = true;
           const value = item.value ?? 20;
@@ -2953,6 +2984,7 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           state.copterTimer = 0;
           state.windTimer = 0;
           state.vy = ROCKET_SPEED;
+          clearPoweredFlightMonsters(state, state.beeY, ROCKET_RECOVERY_DISTANCE);
           playGameSound("rocket");
           burst(state, item.x, sy, "#ffb62b", 18);
         } else if (item.kind === "bambooCopter") {
@@ -2960,8 +2992,9 @@ function GameCanvas({ phase, controlMode, resetToken, onStats, onFail, onMotionD
           state.copterTimer = COPTER_FLIGHT_TIME;
           state.windTimer = 0;
           state.vy = COPTER_SPEED;
+          clearPoweredFlightMonsters(state, state.beeY, COPTER_RECOVERY_DISTANCE);
           playGameSound("copter");
-          burst(state, item.x, sy, "#8dd477", 18);
+          burst(state, item.x, sy, "#dcebf6", 18);
         } else if (item.kind === "bear" || item.kind === "hornet" || item.kind === "bat") {
           const stomped = state.vy < 0 && state.beeY > item.y + 18;
           if (stomped) {
